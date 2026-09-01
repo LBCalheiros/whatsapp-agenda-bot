@@ -1,0 +1,46 @@
+{
+  "name": "whatsapp-agenda-bot",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm run services:up && next dev",
+    "services:up": "docker compose -f infra/compose.yaml up -d",
+    "services:stop": "docker compose -f infra/compose.yaml stop",
+    "services:down": "docker compose -f infra/compose.yaml down",
+    "build": "next build",
+    "start": "next start",
+    "lint:check": "eslint && prettier --check .",
+    "lint:fix": "eslint --fix && prettier --write .",
+    "test": "jest --runInBand",
+    "test:watch": "jest --watchAll --runInBand",
+    "migration:create": "node-pg-migrate -m infra/migrations create",
+    "migration:up": "node-pg-migrate -m infra/migrations --envPath .env.development up"
+  },
+  "dependencies": {
+    "next": "16.3.4",
+    "pg": "^8.23.0",
+    "pino": "^10.3.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.6",
+    "@tailwindcss/postcss": "^4",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
+    "dotenv-expand": "^1000.0.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.4",
+    "eslint-config-prettier": "^10.1.8",
+    "jest": "^30.5.1",
+    "node-pg-migrate": "^9.0.0",
+    "prettier": "^3.9.6",
+    "tailwindcss": "^4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5"
+  }
+}
