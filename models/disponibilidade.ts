@@ -10,6 +10,16 @@ type RegraDisponibilidade = {
   intervalo_minutos: number;
 };
 
+const OFFSET_FUSO_MINUTOS = -3 * 60;
+
+function paraHorarioLocal(instante: Date): Date {
+  return new Date(instante.getTime() + OFFSET_FUSO_MINUTOS * 60_000);
+}
+
+function paraInstanteReal(horarioLocal: Date): Date {
+  return new Date(horarioLocal.getTime() - OFFSET_FUSO_MINUTOS * 60_000);
+}
+
 export async function criarRegraDisponibilidade(input: {
   profissionalId: number;
   diaSemana: number;
@@ -75,7 +85,8 @@ export async function consultarHorariosDisponiveis(
   data: Date,
   duracaoMinutos: number,
 ): Promise<Date[]> {
-  const diaSemana = data.getDay();
+  const dataLocal = paraHorarioLocal(data);
+  const diaSemana = dataLocal.getUTCDay();
 
   const { rows: regras } = await pool.query(
     `SELECT * FROM regras_disponibilidade WHERE profissional_id = $1 AND dia_semana = $2`,
@@ -89,10 +100,13 @@ export async function consultarHorariosDisponiveis(
   const [horaIni, minIni] = regra.horario_inicio.split(':').map(Number);
   const [horaFim, minFim] = regra.horario_fim.split(':').map(Number);
 
-  const inicioExpediente = new Date(data);
-  inicioExpediente.setHours(horaIni, minIni, 0, 0);
-  const fimExpediente = new Date(data);
-  fimExpediente.setHours(horaFim, minFim, 0, 0);
+  const inicioExpedienteLocal = new Date(dataLocal);
+  inicioExpedienteLocal.setUTCHours(horaIni, minIni, 0, 0);
+  const fimExpedienteLocal = new Date(dataLocal);
+  fimExpedienteLocal.setUTCHours(horaFim, minFim, 0, 0);
+
+  const inicioExpediente = paraInstanteReal(inicioExpedienteLocal);
+  const fimExpediente = paraInstanteReal(fimExpedienteLocal);
 
   let cursor = new Date(inicioExpediente);
   while (cursor.getTime() + duracaoMinutos * 60_000 <= fimExpediente.getTime()) {
@@ -100,10 +114,13 @@ export async function consultarHorariosDisponiveis(
     cursor = new Date(cursor.getTime() + regra.intervalo_minutos * 60_000);
   }
 
-  const inicioDia = new Date(data);
-  inicioDia.setHours(0, 0, 0, 0);
-  const fimDia = new Date(data);
-  fimDia.setHours(23, 59, 59, 999);
+  const inicioDiaLocal = new Date(dataLocal);
+  inicioDiaLocal.setUTCHours(0, 0, 0, 0);
+  const fimDiaLocal = new Date(dataLocal);
+  fimDiaLocal.setUTCHours(23, 59, 59, 999);
+
+  const inicioDia = paraInstanteReal(inicioDiaLocal);
+  const fimDia = paraInstanteReal(fimDiaLocal);
 
   const { rows: ocupados } = await pool.query(
     `SELECT a.data_hora, s.duracao_minutos
