@@ -111,3 +111,29 @@ export async function enviarMensagemTemplateComBotoes(input: {
 
   return processarResposta(response);
 }
+
+export async function enviarMensagemBotoes(input: {
+  telefone: string;
+  corpo: string;
+  botoes: { id: string; titulo: string }[];
+}) {
+  const { telefone, corpo, botoes } = input;
+
+  const response = await chamarApiComRetry({
+    messaging_product: 'whatsapp',
+    to: telefone,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: corpo },
+      action: {
+        buttons: botoes.map((botao) => ({
+          type: 'reply',
+          reply: { id: botao.id, title: botao.titulo },
+        })),
+      },
+    },
+  });
+
+  return processarResposta(response);
+}

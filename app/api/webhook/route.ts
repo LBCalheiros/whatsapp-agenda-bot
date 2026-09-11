@@ -1,5 +1,5 @@
-import { AppError } from 'infra/errors';
 import { logger } from '@/infra/logger';
+import { processarMensagem } from '@/models/conversa';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -29,6 +29,20 @@ export async function POST(request: Request) {
     const tipoMensagem = message.type;
 
     logger.info({ numeroCliente, tipoMensagem, message }, 'Mensagem recebida do WhatsApp');
+
+    if (tipoMensagem === 'text') {
+      await processarMensagem(numeroCliente, { tipo: 'texto', valor: message.text.body });
+    } else if (tipoMensagem === 'interactive' && message.interactive?.type === 'button_reply') {
+      await processarMensagem(numeroCliente, {
+        tipo: 'botao',
+        id: message.interactive.button_reply.id,
+      });
+    } else if (tipoMensagem === 'button') {
+      await processarMensagem(numeroCliente, {
+        tipo: 'botao',
+        id: message.button.payload,
+      });
+    }
 
     return Response.json({ ok: true });
   } catch (error) {
