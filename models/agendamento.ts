@@ -12,6 +12,8 @@ type Agendamento = {
   lembrete_enviado: boolean;
 };
 
+export const ANTECEDENCIA_MINIMA_HORAS = 2;
+
 export async function criarAgendamento(input: {
   clienteId: number;
   profissionalId: number;
@@ -19,6 +21,13 @@ export async function criarAgendamento(input: {
   dataHora: Date;
 }) {
   const { clienteId, profissionalId, servicoId, dataHora } = input;
+
+  const horasAteAgendamento = (dataHora.getTime() - Date.now()) / (1000 * 60 * 60);
+  if (horasAteAgendamento < ANTECEDENCIA_MINIMA_HORAS) {
+    throw new AppError(
+      `Agendamentos precisam ser feitos com pelo menos ${ANTECEDENCIA_MINIMA_HORAS}h de antecedência`,
+    );
+  }
 
   const { rows: servicos } = await pool.query(
     `SELECT duracao_minutos FROM servicos WHERE id = $1 AND ativo = true`,
@@ -53,8 +62,10 @@ export async function criarAgendamento(input: {
 
 export async function listarAgendamentos(filtros: {
   profissionalId?: number;
+  clienteId?: number;
   data?: Date;
   status?: string;
+  apenasFuturos?: boolean;
 }) {
   const condicoes: string[] = [];
   const valores: unknown[] = [];
@@ -63,9 +74,17 @@ export async function listarAgendamentos(filtros: {
     valores.push(filtros.profissionalId);
     condicoes.push(`a.profissional_id = $${valores.length}`);
   }
+  if (filtros.clienteId) {
+    valores.push(filtros.clienteId);
+    condicoes.push(`a.cliente_id = $${valores.length}`);
+  }
   if (filtros.status) {
     valores.push(filtros.status);
     condicoes.push(`a.status = $${valores.length}`);
+  }
+  if (filtros.apenasFuturos) {
+    valores.push(new Date());
+    condicoes.push(`a.data_hora >= $${valores.length} AND a.status != 'cancelado'`);
   }
   if (filtros.data) {
     const inicioDia = new Date(filtros.data);
@@ -104,7 +123,6 @@ export async function buscarPorId(agendamentoId: number): Promise<Agendamento> {
   return rows[0];
 }
 
-// operação neutra, sem regra de prazo — usada pelo painel
 export async function cancelarAgendamento(agendamentoId: number) {
   const agendamento = await buscarPorId(agendamentoId);
 
@@ -113,7 +131,6 @@ export async function cancelarAgendamento(agendamentoId: number) {
   await registrarHistorico(agendamentoId, agendamento.status, 'cancelado');
 }
 
-// caminho do cliente pelo bot (#7): aplica a regra de 24h e delega pra neutra
 export async function cancelarComoCliente(agendamentoId: number) {
   const agendamento = await buscarPorId(agendamentoId);
 
