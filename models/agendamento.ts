@@ -123,6 +123,7 @@ export async function buscarPorId(agendamentoId: number): Promise<Agendamento> {
   return rows[0];
 }
 
+// operação neutra, sem regra de prazo — usada pelo painel
 export async function cancelarAgendamento(agendamentoId: number) {
   const agendamento = await buscarPorId(agendamentoId);
 
@@ -146,6 +147,13 @@ export async function cancelarComoCliente(agendamentoId: number) {
 
 export async function reagendarAgendamento(agendamentoId: number, novaDataHora: Date) {
   const agendamento = await buscarPorId(agendamentoId);
+
+  const horasAteNovoAgendamento = (novaDataHora.getTime() - Date.now()) / (1000 * 60 * 60);
+  if (horasAteNovoAgendamento < ANTECEDENCIA_MINIMA_HORAS) {
+    throw new AppError(
+      `Reagendamentos precisam ser feitos com pelo menos ${ANTECEDENCIA_MINIMA_HORAS}h de antecedência`,
+    );
+  }
 
   const { rows: servicos } = await pool.query(
     `SELECT duracao_minutos FROM servicos WHERE id = $1`,

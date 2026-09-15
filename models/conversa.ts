@@ -64,7 +64,14 @@ async function atualizarEstado(
   );
 }
 
+const ESTADOS_COM_CONTEXTO_TEMPORAL = [
+  'fluxo_agendamento_escolhendo_horario',
+  'fluxo_agendamento_confirmando',
+  'fluxo_ver_agendamentos',
+];
+
 function conversaExpirou(conversa: EstadoConversa): boolean {
+  if (!ESTADOS_COM_CONTEXTO_TEMPORAL.includes(conversa.estado)) return false;
   const minutosSemInteracao = (Date.now() - new Date(conversa.atualizado_em).getTime()) / 1000 / 60;
   return minutosSemInteracao > TIMEOUT_MINUTOS;
 }
@@ -91,11 +98,17 @@ export async function processarMensagem(telefone: string, entrada: Entrada) {
   const { conversa, novaConversa } = await buscarOuCriarConversa(telefone);
 
   const cliqueVoltar = entrada.tipo === 'botao' && entrada.id === 'voltar_menu';
-  const precisaResetar = novaConversa || cliqueVoltar || conversaExpirou(conversa);
+  const expirou = conversaExpirou(conversa);
+  const precisaResetar = novaConversa || cliqueVoltar || expirou;
 
   if (precisaResetar) {
     await atualizarEstado(telefone, 'menu');
-    await enviarMenu(telefone, novaConversa ? 'Olá! ' : '');
+    const saudacao = novaConversa
+      ? 'Olá! '
+      : expirou
+        ? 'Faz um tempo que você não responde, vamos recomeçar. '
+        : '';
+    await enviarMenu(telefone, saudacao);
     return;
   }
 
@@ -153,8 +166,6 @@ async function processarMenu(telefone: string, entrada: Entrada) {
   await enviarMensagemTexto(telefone, 'Por favor, escolha uma das opções abaixo:');
   await enviarMenu(telefone);
 }
-
-// --- Fluxo: agendar horário ---
 
 async function obterProfissionalEServicoPadrao(): Promise<{
   profissionalId: number;
@@ -335,6 +346,8 @@ async function processarConfirmacao(
   }
 }
 
+const MAX_AGENDAMENTOS_CANCELAVEIS = 2;
+
 async function iniciarFluxoVerAgendamentos(telefone: string) {
   const { rows: clientes } = await pool.query(`SELECT id FROM clientes WHERE telefone = $1`, [
     telefone,
@@ -365,27 +378,31 @@ async function iniciarFluxoVerAgendamentos(telefone: string) {
     return;
   }
 
-  if (agendamentos.length > 1) {
-    // MVP: cancelamento guiado só cobre o caso mais comum (1 agendamento futuro).
-    // Com mais de um, listamos e direcionamos pro atendente até #30/#31 existirem.
-    const lista = agendamentos
-      .map((a) => `• ${formatarDataHora(new Date(a.data_hora))} — ${a.servico_nome}`)
-      .join('\n');
-    await enviarMensagemBotoes({
-      telefone,
-      corpo: `Seus agendamentos:\n${lista}\n\nPara cancelar, fale com um atendente.`,
-      botoes: BOTAO_ATENDENTE_E_VOLTAR,
-    });
-    await atualizarEstado(telefone, 'menu');
-    return;
-  }
+  const canceláveis = agendamentos.slice(0, MAX_AGENDAMENTOS_CANCELAVEIS);
 
-  const agendamento = agendamentos[0];
-  await atualizarEstado(telefone, 'fluxo_ver_agendamentos', { agendamentoId: agendamento.id });
+  const lista = agendamentos
+    .map((a) => `• ${formatarDataHora(new Date(a.data_hora))} — ${a.servico_nome}`)
+    .join('\n');
+
+  const aviso =
+    agendamentos.length > MAX_AGENDAMENTOS_CANCELAVEIS
+      ? `\n\nMostrando os ${MAX_AGENDAMENTOS_CANCELAVEIS} mais próximos pra cancelar por aqui. Pra cancelar os outros, fale com um atendente.`
+      : '';
+
+  await atualizarEstado(telefone, 'fluxo_ver_agendamentos', {
+    agendamentoIds: canceláveis.map((a) => a.id),
+  });
+
   await enviarMensagemBotoes({
     telefone,
-    corpo: `Você tem um agendamento em ${formatarDataHora(new Date(agendamento.data_hora))} (${agendamento.servico_nome}). Deseja cancelar?`,
-    botoes: [{ id: 'cancelar_agendamento', titulo: 'Cancelar' }, ...BOTAO_VOLTAR],
+    corpo: `Seus agendamentos:\n${lista}${aviso}\n\nToque em um horário abaixo pra cancelar:`,
+    botoes: [
+      ...canceláveis.map((a) => ({
+        id: `cancelar_agendamento_${a.id}`,
+        titulo: formatarDataHora(new Date(a.data_hora)),
+      })),
+      ...BOTAO_VOLTAR,
+    ],
   });
 }
 
@@ -394,12 +411,27 @@ async function processarCancelamento(
   entrada: Entrada,
   contexto: Record<string, unknown> | null,
 ) {
-  if (entrada.tipo !== 'botao' || entrada.id !== 'cancelar_agendamento') {
-    await enviarMensagemTexto(telefone, 'Por favor, toque em Cancelar ou Voltar.');
+  const agendamentoIds = (contexto?.agendamentoIds as number[]) ?? [];
+
+  if (entrada.tipo !== 'botao' || !entrada.id.startsWith('cancelar_agendamento_')) {
+    await enviarMensagemTexto(
+      telefone,
+      'Por favor, toque em um dos horários enviados, ou em Voltar.',
+    );
     return;
   }
 
-  const agendamentoId = contexto?.agendamentoId as number;
+  const agendamentoId = Number(entrada.id.slice('cancelar_agendamento_'.length));
+
+  if (!agendamentoIds.includes(agendamentoId)) {
+    await enviarMensagemTexto(
+      telefone,
+      'Esse agendamento não está mais disponível pra cancelar por aqui.',
+    );
+    await atualizarEstado(telefone, 'menu');
+    await enviarMenu(telefone);
+    return;
+  }
 
   try {
     await cancelarComoCliente(agendamentoId);
@@ -408,7 +440,6 @@ async function processarCancelamento(
     await enviarMenu(telefone);
   } catch (error) {
     if (error instanceof AppError) {
-      // ex: regra de 24h não cumprida
       await enviarMensagemTexto(telefone, error.message);
       await atualizarEstado(telefone, 'menu');
       await enviarMenu(telefone);
