@@ -8,6 +8,7 @@ import {
   criarAgendamento,
   cancelarComoCliente,
   listarAgendamentos,
+  buscarPorId,
 } from '@/models/agendamento';
 
 const TIMEOUT_MINUTOS = 10;
@@ -63,11 +64,11 @@ async function atualizarEstado(
     [novoEstado, contexto ? JSON.stringify(contexto) : null, telefone],
   );
 }
-
 const ESTADOS_COM_CONTEXTO_TEMPORAL = [
   'fluxo_agendamento_escolhendo_horario',
   'fluxo_agendamento_confirmando',
   'fluxo_ver_agendamentos',
+  'fluxo_cancelamento_confirmando',
 ];
 
 function conversaExpirou(conversa: EstadoConversa): boolean {
@@ -129,6 +130,10 @@ export async function processarMensagem(telefone: string, entrada: Entrada) {
       await processarCancelamento(telefone, entrada, conversa.contexto);
       break;
 
+    case 'fluxo_cancelamento_confirmando':
+      await processarConfirmacaoCancelamento(telefone, entrada, conversa.contexto);
+      break;
+
     case 'aguardando_atendente':
       await enviarMensagemBotoes({
         telefone,
@@ -166,6 +171,8 @@ async function processarMenu(telefone: string, entrada: Entrada) {
   await enviarMensagemTexto(telefone, 'Por favor, escolha uma das opções abaixo:');
   await enviarMenu(telefone);
 }
+
+// --- Fluxo: agendar horário ---
 
 async function obterProfissionalEServicoPadrao(): Promise<{
   profissionalId: number;
@@ -346,6 +353,8 @@ async function processarConfirmacao(
   }
 }
 
+// --- Fluxo: ver / cancelar agendamentos ---
+
 const MAX_AGENDAMENTOS_CANCELAVEIS = 2;
 
 async function iniciarFluxoVerAgendamentos(telefone: string) {
@@ -430,6 +439,36 @@ async function processarCancelamento(
     );
     await atualizarEstado(telefone, 'menu');
     await enviarMenu(telefone);
+    return;
+  }
+
+  const agendamento = await buscarPorId(agendamentoId);
+
+  await atualizarEstado(telefone, 'fluxo_cancelamento_confirmando', { agendamentoId });
+  await enviarMensagemBotoes({
+    telefone,
+    corpo: `Confirmar cancelamento do agendamento de ${formatarDataHora(new Date(agendamento.data_hora))}?`,
+    botoes: [
+      { id: 'confirmar_cancelamento', titulo: 'Confirmar' },
+      { id: 'manter_agendamento', titulo: 'Manter agendamento' },
+    ],
+  });
+}
+
+async function processarConfirmacaoCancelamento(
+  telefone: string,
+  entrada: Entrada,
+  contexto: Record<string, unknown> | null,
+) {
+  const agendamentoId = contexto?.agendamentoId as number;
+
+  if (entrada.tipo === 'botao' && entrada.id === 'manter_agendamento') {
+    await iniciarFluxoVerAgendamentos(telefone);
+    return;
+  }
+
+  if (entrada.tipo !== 'botao' || entrada.id !== 'confirmar_cancelamento') {
+    await enviarMensagemTexto(telefone, 'Por favor, toque em Confirmar ou Manter agendamento.');
     return;
   }
 
