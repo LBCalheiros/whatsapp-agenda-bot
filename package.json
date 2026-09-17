@@ -14,7 +14,8 @@
     "test": "jest --runInBand",
     "test:watch": "jest --watchAll --runInBand",
     "migration:create": "node-pg-migrate -m infra/migrations create",
-    "migration:up": "node-pg-migrate -m infra/migrations --envPath .env.development up"
+    "migration:up": "node-pg-migrate -m infra/migrations --envPath .env.development up",
+    "admin:criar": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\"}' node -r ts-node/register -r tsconfig-paths/register scripts/criar-admin.ts"
   },
   "dependencies": {
     "next": "16.3.4",
@@ -42,6 +43,7 @@
     "tailwindcss": "^4",
     "ts-jest": "^29.4.12",
     "ts-node": "^10.9.2",
-    "typescript": "^5"
+    "typescript": "^5",
+    "tsconfig-paths": "^3.15.0"
   }
 }

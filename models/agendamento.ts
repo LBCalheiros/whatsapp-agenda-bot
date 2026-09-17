@@ -12,6 +12,7 @@ type Agendamento = {
   lembrete_enviado: boolean;
 };
 
+// regra decidida: agendamento exige pelo menos 2h de antecedência no momento da marcação
 export const ANTECEDENCIA_MINIMA_HORAS = 2;
 
 export async function criarAgendamento(input: {
@@ -132,6 +133,7 @@ export async function cancelarAgendamento(agendamentoId: number) {
   await registrarHistorico(agendamentoId, agendamento.status, 'cancelado');
 }
 
+// caminho do cliente pelo bot (#7): aplica a regra de 24h e delega pra neutra
 export async function cancelarComoCliente(agendamentoId: number) {
   const agendamento = await buscarPorId(agendamentoId);
 
@@ -163,10 +165,10 @@ export async function reagendarAgendamento(agendamentoId: number, novaDataHora: 
 
   await validarHorarioDisponivel(agendamento.profissional_id, novaDataHora, duracaoMinutos);
 
-  await pool.query(`UPDATE agendamentos SET data_hora = $1 WHERE id = $2`, [
-    novaDataHora,
-    agendamentoId,
-  ]);
+  await pool.query(
+    `UPDATE agendamentos SET data_hora = $1, lembrete_enviado = false WHERE id = $2`,
+    [novaDataHora, agendamentoId],
+  );
 
   await registrarHistorico(
     agendamentoId,
