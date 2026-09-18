@@ -30,7 +30,6 @@ export async function autenticar(email: string, senhaPlana: string): Promise<Usu
   return usuario;
 }
 
-// invalida todo token de sessão emitido antes desse ponto (usado no logout)
 export async function invalidarSessoes(usuarioId: number): Promise<number> {
   const { rows } = await pool.query(
     `UPDATE usuarios_admin SET versao_token = versao_token + 1 WHERE id = $1 RETURNING versao_token`,

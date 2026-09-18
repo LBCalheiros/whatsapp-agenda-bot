@@ -12,6 +12,11 @@ import {
   listarAgendamentos,
   buscarPorId,
 } from '@/models/agendamento';
+import {
+  buscarAtendimentoAbertoPorTelefone,
+  iniciarAtendimento,
+  registrarMensagem,
+} from '@/models/atendimento';
 
 const TIMEOUT_MINUTOS = 10;
 const DIAS_BUSCA_HORARIOS = 7;
@@ -90,6 +95,14 @@ async function enviarMenu(telefone: string, saudacao = '') {
 }
 
 export async function processarMensagem(telefone: string, entrada: Entrada) {
+  const atendimentoAberto = await buscarAtendimentoAbertoPorTelefone(telefone);
+  if (atendimentoAberto) {
+    const texto =
+      entrada.tipo === 'texto' ? entrada.valor : `[cliente tocou em um botão: ${entrada.id}]`;
+    await registrarMensagem(atendimentoAberto.id, 'cliente', texto);
+    return;
+  }
+
   if (entrada.tipo === 'botao' && entrada.id.startsWith('lembrete_cancelar_')) {
     await processarGatilhoLembrete(
       telefone,
@@ -153,15 +166,6 @@ export async function processarMensagem(telefone: string, entrada: Entrada) {
     case 'fluxo_remarcar_confirmando':
       await processarConfirmacaoRemarcacao(telefone, entrada, conversa.contexto);
       break;
-
-    case 'aguardando_atendente':
-      await enviarMensagemBotoes({
-        telefone,
-        corpo: 'Um atendente vai falar com você em breve.',
-        botoes: BOTAO_VOLTAR,
-      });
-      break;
-
     default:
       await atualizarEstado(telefone, 'menu');
       await enviarMenu(telefone);
@@ -177,14 +181,16 @@ async function processarMenu(telefone: string, entrada: Entrada) {
       case 'menu_ver_agendamentos':
         await iniciarFluxoVerAgendamentos(telefone);
         return;
-      case 'menu_atendente':
+      case 'menu_atendente': {
+        const cliente = await buscarOuCriarClientePorTelefone(telefone);
+        await iniciarAtendimento(cliente.id);
         await atualizarEstado(telefone, 'aguardando_atendente');
-        await enviarMensagemBotoes({
+        await enviarMensagemTexto(
           telefone,
-          corpo: 'Ok, vou te conectar com um atendente. (fluxo em construção)',
-          botoes: BOTAO_VOLTAR,
-        });
+          'Ok, um atendente vai falar com você em breve. Pode mandar sua mensagem por aqui.',
+        );
         return;
+      }
     }
   }
 

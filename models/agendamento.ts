@@ -12,7 +12,6 @@ type Agendamento = {
   lembrete_enviado: boolean;
 };
 
-// regra decidida: agendamento exige pelo menos 2h de antecedência no momento da marcação
 export const ANTECEDENCIA_MINIMA_HORAS = 2;
 
 export async function criarAgendamento(input: {
@@ -124,7 +123,6 @@ export async function buscarPorId(agendamentoId: number): Promise<Agendamento> {
   return rows[0];
 }
 
-// operação neutra, sem regra de prazo — usada pelo painel
 export async function cancelarAgendamento(agendamentoId: number) {
   const agendamento = await buscarPorId(agendamentoId);
 
@@ -133,7 +131,6 @@ export async function cancelarAgendamento(agendamentoId: number) {
   await registrarHistorico(agendamentoId, agendamento.status, 'cancelado');
 }
 
-// caminho do cliente pelo bot (#7): aplica a regra de 24h e delega pra neutra
 export async function cancelarComoCliente(agendamentoId: number) {
   const agendamento = await buscarPorId(agendamentoId);
 

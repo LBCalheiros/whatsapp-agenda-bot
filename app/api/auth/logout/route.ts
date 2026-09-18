@@ -7,8 +7,6 @@ export async function POST() {
   const sessao = await obterSessaoAtual();
 
   if (sessao) {
-    // invalida no servidor todo token emitido antes disso pra esse usuário,
-    // não só o cookie deste navegador
     await invalidarSessoes(sessao.usuarioId);
   }
 

@@ -11,7 +11,6 @@ export function useApi<T>(caminho: string): Estado<T> {
 
   useEffect(() => {
     let ativo = true;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- resetar pra "carregando" quando `caminho` muda é intencional, não um efeito colateral acidental
     setEstado({ status: 'carregando' });
 
     apiFetch<T>(caminho)
