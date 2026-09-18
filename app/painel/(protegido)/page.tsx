@@ -14,8 +14,7 @@ export default function PainelDashboardPage() {
     <div>
       <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
       <p className="mt-1 text-sm text-gray-500">
-        Conteúdo real fica pra #23 — essa tela só prova que layout protegido, navegação e
-        comunicação com a API estão funcionando.
+        Isso é um teste da página após o login. Dashboard ainda vai ser configurada.
       </p>
 
       <Card className="mt-6 max-w-sm">
