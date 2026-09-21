@@ -1,8 +1,14 @@
 import { AppError } from '@/infra/errors';
 import { logger } from '@/infra/logger';
+import { obterSessaoAtual } from '@/infra/autenticacaoMiddleware';
 import { cancelarAgendamento } from '@/models/agendamento';
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const sessao = await obterSessaoAtual();
+  if (!sessao) {
+    return Response.json({ error: 'Não autenticado' }, { status: 401 });
+  }
+
   try {
     const { id } = await params;
     await cancelarAgendamento(Number(id));

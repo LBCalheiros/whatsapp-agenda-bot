@@ -7,15 +7,21 @@ export type UsuarioAdmin = {
   senha_hash: string;
   role: string;
   versao_token: number;
+  telefone_notificacao: string | null;
   criado_em: string;
 };
 
-export async function criarUsuarioAdmin(email: string, senhaPlana: string, role = 'admin') {
+export async function criarUsuarioAdmin(
+  email: string,
+  senhaPlana: string,
+  telefoneNotificacao: string | null = null,
+  role = 'admin',
+) {
   const senhaHash = gerarHashSenha(senhaPlana);
   const { rows } = await pool.query(
-    `INSERT INTO usuarios_admin (email, senha_hash, role) VALUES ($1, $2, $3)
-     RETURNING id, email, role, criado_em`,
-    [email, senhaHash, role],
+    `INSERT INTO usuarios_admin (email, senha_hash, role, telefone_notificacao) VALUES ($1, $2, $3, $4)
+     RETURNING id, email, role, telefone_notificacao, criado_em`,
+    [email, senhaHash, role, telefoneNotificacao],
   );
   return rows[0];
 }
@@ -30,6 +36,7 @@ export async function autenticar(email: string, senhaPlana: string): Promise<Usu
   return usuario;
 }
 
+// invalida todo token de sessão emitido antes desse ponto (usado no logout)
 export async function invalidarSessoes(usuarioId: number): Promise<number> {
   const { rows } = await pool.query(
     `UPDATE usuarios_admin SET versao_token = versao_token + 1 WHERE id = $1 RETURNING versao_token`,

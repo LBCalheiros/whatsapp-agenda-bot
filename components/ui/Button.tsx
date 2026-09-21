@@ -7,8 +7,8 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 export function Button({ variante = 'primario', className = '', ...props }: ButtonProps) {
   const estilos =
     variante === 'primario'
-      ? 'bg-gray-900 text-white hover:bg-gray-800'
-      : 'bg-white text-gray-900 border border-gray-300 hover:bg-gray-50';
+      ? 'bg-gray-900 text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white'
+      : 'bg-white text-gray-900 border border-gray-300 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-100 dark:border-gray-600 dark:hover:bg-gray-700';
 
   return (
     <button

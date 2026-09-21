@@ -1,8 +1,14 @@
 import { AppError } from '@/infra/errors';
 import { logger } from '@/infra/logger';
+import { obterSessaoAtual } from '@/infra/autenticacaoMiddleware';
 import { criarAgendamento, listarAgendamentos } from '@/models/agendamento';
 
 export async function GET(request: Request) {
+  const sessao = await obterSessaoAtual();
+  if (!sessao) {
+    return Response.json({ error: 'Não autenticado' }, { status: 401 });
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const profissionalId = searchParams.get('profissionalId');
@@ -26,6 +32,11 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const sessao = await obterSessaoAtual();
+  if (!sessao) {
+    return Response.json({ error: 'Não autenticado' }, { status: 401 });
+  }
+
   try {
     const body = await request.json();
 

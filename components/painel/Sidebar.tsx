@@ -3,9 +3,11 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/apiClient';
+import { ThemeToggle } from './ThemeToggle';
 
 const ITENS_NAV = [
   { href: '/painel', label: 'Dashboard' },
+  { href: '/painel/atendimentos', label: 'Atendimentos' },
   { href: '/painel/agenda', label: 'Agenda' },
   { href: '/painel/funcionarios', label: 'Funcionários' },
   { href: '/painel/configuracoes', label: 'Configurações' },
@@ -22,8 +24,8 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r border-gray-200 bg-white p-4">
-      <div className="mb-6 px-2 text-sm font-semibold text-gray-900">Painel</div>
+    <aside className="flex w-56 shrink-0 flex-col border-r border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
+      <div className="mb-6 px-2 text-sm font-semibold text-gray-900 dark:text-gray-100">Painel</div>
 
       <nav className="flex flex-1 flex-col gap-1">
         {ITENS_NAV.map((item) => {
@@ -33,7 +35,9 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               className={`rounded px-3 py-2 text-sm font-medium transition-colors ${
-                ativo ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'
+                ativo
+                  ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                  : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
               }`}
             >
               {item.label}
@@ -42,9 +46,11 @@ export function Sidebar() {
         })}
       </nav>
 
+      <ThemeToggle />
+
       <button
         onClick={handleLogout}
-        className="rounded px-3 py-2 text-left text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+        className="rounded px-3 py-2 text-left text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
       >
         Sair
       </button>

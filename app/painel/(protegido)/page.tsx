@@ -44,7 +44,7 @@ export default function PainelDashboardPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
+      <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">Dashboard</h1>
 
       {estado.status === 'carregando' && <LoadingState texto="Carregando dashboard..." />}
       {estado.status === 'erro' && <ErrorState mensagem={estado.mensagem} />}
@@ -53,20 +53,20 @@ export default function PainelDashboardPage() {
         <>
           <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <Card>
-              <p className="text-sm text-gray-500">Agendamentos hoje</p>
-              <p className="mt-1 text-3xl font-semibold text-gray-900">
+              <p className="text-sm text-gray-500 dark:text-gray-400">Agendamentos hoje</p>
+              <p className="mt-1 text-3xl font-semibold text-gray-900 dark:text-gray-100">
                 {estado.dados.resumo.agendamentosHoje}
               </p>
             </Card>
             <Card>
-              <p className="text-sm text-gray-500">Agendamentos essa semana</p>
-              <p className="mt-1 text-3xl font-semibold text-gray-900">
+              <p className="text-sm text-gray-500 dark:text-gray-400">Agendamentos essa semana</p>
+              <p className="mt-1 text-3xl font-semibold text-gray-900 dark:text-gray-100">
                 {estado.dados.resumo.agendamentosSemana}
               </p>
             </Card>
             <Card>
-              <p className="text-sm text-gray-500">Atendimentos aguardando</p>
-              <p className="mt-1 text-3xl font-semibold text-gray-900">
+              <p className="text-sm text-gray-500 dark:text-gray-400">Atendimentos aguardando</p>
+              <p className="mt-1 text-3xl font-semibold text-gray-900 dark:text-gray-100">
                 {estado.dados.resumo.atendimentosAguardando}
               </p>
             </Card>
@@ -74,18 +74,22 @@ export default function PainelDashboardPage() {
 
           <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
             <Card>
-              <h2 className="text-sm font-semibold text-gray-900">Próximos agendamentos</h2>
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                Próximos agendamentos
+              </h2>
               {estado.dados.proximosAgendamentos.length === 0 ? (
-                <p className="mt-3 text-sm text-gray-500">Nenhum agendamento futuro.</p>
+                <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
+                  Nenhum agendamento futuro.
+                </p>
               ) : (
                 <ul className="mt-3 flex flex-col gap-3">
                   {estado.dados.proximosAgendamentos.map((agendamento) => (
                     <li key={agendamento.id} className="flex justify-between text-sm">
-                      <span className="text-gray-700">
+                      <span className="text-gray-700 dark:text-gray-300">
                         {agendamento.cliente_nome ?? 'Cliente sem nome'} ·{' '}
                         {agendamento.servico_nome}
                       </span>
-                      <span className="text-gray-500">
+                      <span className="text-gray-500 dark:text-gray-400">
                         {formatarDataHora(agendamento.data_hora)}
                       </span>
                     </li>
@@ -95,17 +99,21 @@ export default function PainelDashboardPage() {
             </Card>
 
             <Card>
-              <h2 className="text-sm font-semibold text-gray-900">Atendimentos aguardando</h2>
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                Atendimentos aguardando
+              </h2>
               {estado.dados.atendimentosAguardando.length === 0 ? (
-                <p className="mt-3 text-sm text-gray-500">Nenhum atendimento pendente.</p>
+                <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
+                  Nenhum atendimento pendente.
+                </p>
               ) : (
                 <ul className="mt-3 flex flex-col gap-3">
                   {estado.dados.atendimentosAguardando.map((atendimento) => (
                     <li key={atendimento.id} className="flex justify-between text-sm">
-                      <span className="text-gray-700">
+                      <span className="text-gray-700 dark:text-gray-300">
                         {atendimento.cliente_nome ?? atendimento.cliente_telefone}
                       </span>
-                      <span className="text-gray-500">
+                      <span className="text-gray-500 dark:text-gray-400">
                         {formatarDataHora(atendimento.criado_em)}
                       </span>
                     </li>

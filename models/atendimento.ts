@@ -1,5 +1,7 @@
 import { pool } from '@/infra/database';
 import { AppError } from '@/infra/errors';
+import { enviarMensagemTexto } from '@/infra/whatsapp';
+import { logger } from '@/infra/logger';
 
 export type StatusAtendimento = 'bot_ativo' | 'aguardando_humano' | 'humano_ativo' | 'encerrado';
 
@@ -19,7 +21,38 @@ export async function iniciarAtendimento(clienteId: number, agendamentoId: numbe
      VALUES ($1, $2, 'aguardando_humano') RETURNING *`,
     [clienteId, agendamentoId],
   );
-  return rows[0];
+  const atendimento = rows[0];
+
+  await notificarFuncionariosNovoAtendimento(clienteId);
+
+  return atendimento;
+}
+
+async function notificarFuncionariosNovoAtendimento(clienteId: number) {
+  const { rows: funcionarios } = await pool.query(
+    `SELECT telefone_notificacao FROM usuarios_admin WHERE telefone_notificacao IS NOT NULL`,
+  );
+  if (funcionarios.length === 0) return;
+
+  const { rows: clientesEncontrados } = await pool.query(
+    `SELECT nome, telefone FROM clientes WHERE id = $1`,
+    [clienteId],
+  );
+  const cliente = clientesEncontrados[0];
+  const identificacao = cliente?.nome || cliente?.telefone || 'um cliente';
+  const texto = `Novo atendimento aguardando: ${identificacao} pediu pra falar com um atendente.`;
+
+  for (const funcionario of funcionarios) {
+    try {
+      await enviarMensagemTexto(funcionario.telefone_notificacao, texto);
+    } catch (error) {
+      // não deixa a falha de notificação quebrar a criação do atendimento
+      logger.error(
+        { error, telefone: funcionario.telefone_notificacao },
+        'Falha ao notificar funcionário sobre novo atendimento',
+      );
+    }
+  }
 }
 
 export async function buscarAtendimentoAbertoPorCliente(clienteId: number) {
@@ -59,10 +92,13 @@ export async function listarAtendimentos(filtros: { status?: string } = {}) {
 
   const { rows } = await pool.query(
     `SELECT ca.*, c.nome AS cliente_nome, c.telefone AS cliente_telefone,
-            u.email AS funcionario_email
+            u.email AS funcionario_email,
+            a.data_hora AS agendamento_data_hora, s.nome AS agendamento_servico_nome
      FROM conversas_atendimento ca
      JOIN clientes c ON c.id = ca.cliente_id
      LEFT JOIN usuarios_admin u ON u.id = ca.funcionario_id
+     LEFT JOIN agendamentos a ON a.id = ca.agendamento_id
+     LEFT JOIN servicos s ON s.id = a.servico_id
      ${where}
      ORDER BY ca.criado_em DESC`,
     valores,

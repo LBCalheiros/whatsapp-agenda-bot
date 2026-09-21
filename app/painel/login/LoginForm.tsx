@@ -33,15 +33,15 @@ export function LoginForm() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-950">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-8 shadow-sm"
+        className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-8 shadow-sm dark:border-gray-700 dark:bg-gray-800"
       >
-        <h1 className="text-lg font-semibold text-gray-900">Entrar</h1>
+        <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Entrar</h1>
 
         <div className="mt-6 flex flex-col gap-4">
-          <label className="flex flex-col gap-1 text-sm text-gray-700">
+          <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
             Email
             <input
               type="email"
@@ -49,11 +49,11 @@ export function LoginForm() {
               autoComplete="username"
               value={email}
               onChange={(evento) => setEmail(evento.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:focus:border-gray-400"
             />
           </label>
 
-          <label className="flex flex-col gap-1 text-sm text-gray-700">
+          <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
             Senha
             <input
               type="password"
@@ -61,7 +61,7 @@ export function LoginForm() {
               autoComplete="current-password"
               value={senha}
               onChange={(evento) => setSenha(evento.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:focus:border-gray-400"
             />
           </label>
 
