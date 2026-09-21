@@ -1,6 +1,7 @@
 import { pool } from '@/infra/database';
 import { enviarMensagemTexto, enviarMensagemBotoes } from '@/infra/whatsapp';
 import { AppError } from '@/infra/errors';
+import { comLockDeConversa } from '@/infra/lockConversa';
 import { formatarDataHora } from '@/infra/data';
 import { buscarOuCriarClientePorTelefone } from '@/models/cliente';
 import { consultarHorariosDisponiveis } from '@/models/disponibilidade';
@@ -20,7 +21,7 @@ import {
 
 const TIMEOUT_MINUTOS = 10;
 const DIAS_BUSCA_HORARIOS = 7;
-const MAX_HORARIOS_EXIBIDOS = 3;
+const MAX_HORARIOS_EXIBIDOS = 3; // limite de botões por mensagem interativa do WhatsApp
 
 const BOTOES_MENU = [
   { id: 'menu_agendar', titulo: 'Agendar horário' },
@@ -71,6 +72,9 @@ async function atualizarEstado(
   );
 }
 
+// só esses estados têm contexto que pode ficar desatualizado (horários já oferecidos,
+// agendamento específico em foco); 'menu' e 'aguardando_atendente' não têm nada a perder
+// esperando, então um clique atrasado neles ainda deve ser processado normalmente.
 const ESTADOS_COM_CONTEXTO_TEMPORAL = [
   'fluxo_agendamento_escolhendo_horario',
   'fluxo_agendamento_confirmando',
@@ -95,8 +99,14 @@ async function enviarMenu(telefone: string, saudacao = '') {
 }
 
 export async function processarMensagem(telefone: string, entrada: Entrada) {
+  return comLockDeConversa(telefone, () => processarMensagemInterna(telefone, entrada));
+}
+
+async function processarMensagemInterna(telefone: string, entrada: Entrada) {
   const atendimentoAberto = await buscarAtendimentoAbertoPorTelefone(telefone);
   if (atendimentoAberto) {
+    // cliente em atendimento humano: tudo que ele manda vira mensagem no ticket,
+    // o bot não processa nada disso (nem menu, nem atalhos do lembrete)
     const texto =
       entrada.tipo === 'texto' ? entrada.valor : `[cliente tocou em um botão: ${entrada.id}]`;
     await registrarMensagem(atendimentoAberto.id, 'cliente', texto);
@@ -166,6 +176,12 @@ export async function processarMensagem(telefone: string, entrada: Entrada) {
     case 'fluxo_remarcar_confirmando':
       await processarConfirmacaoRemarcacao(telefone, entrada, conversa.contexto);
       break;
+
+    // 'aguardando_atendente' não tem case aqui de propósito: enquanto existe um
+    // atendimento aberto pro telefone, processarMensagem já retorna lá no topo,
+    // antes de chegar nesse switch. Se cair aqui mesmo assim (estado desalinhado
+    // do atendimento, por algum motivo), o default abaixo reseta pro menu.
+
     default:
       await atualizarEstado(telefone, 'menu');
       await enviarMenu(telefone);
@@ -205,6 +221,8 @@ async function obterProfissionalEServicoPadrao(): Promise<{
   servicoId: number;
   duracaoMinutos: number;
 } | null> {
+  // MVP: uma empresa = um profissional e um serviço, os dois primeiros ativos cadastrados.
+  // Quando o projeto suportar múltiplos, isso vira uma escolha por botão dentro do fluxo.
   const { rows: profissionais } = await pool.query(
     `SELECT id FROM profissionais WHERE ativo = true ORDER BY id LIMIT 1`,
   );
@@ -371,6 +389,8 @@ async function processarConfirmacao(
     await enviarMenu(telefone);
   } catch (error) {
     if (error instanceof AppError) {
+      // horário ocupado por concorrência, ou caiu abaixo da antecedência mínima
+      // enquanto o cliente decidia: informa e mostra horários atualizados.
       await enviarMensagemTexto(telefone, error.message);
       await exibirHorariosDisponiveis(telefone, profissionalId, servicoId, duracaoMinutos);
       return;
@@ -381,7 +401,7 @@ async function processarConfirmacao(
 
 // --- Fluxo: ver / cancelar agendamentos ---
 
-const MAX_AGENDAMENTOS_CANCELAVEIS = 2;
+const MAX_AGENDAMENTOS_CANCELAVEIS = 2; // + botão Voltar = 3, limite de botões do WhatsApp
 
 async function iniciarFluxoVerAgendamentos(telefone: string) {
   const { rows: clientes } = await pool.query(`SELECT id FROM clientes WHERE telefone = $1`, [
@@ -413,6 +433,7 @@ async function iniciarFluxoVerAgendamentos(telefone: string) {
     return;
   }
 
+  // já vem ordenado por data_hora crescente; cancelamento guiado cobre os mais próximos
   const canceláveis = agendamentos.slice(0, MAX_AGENDAMENTOS_CANCELAVEIS);
 
   const lista = agendamentos
@@ -459,6 +480,7 @@ async function processarCancelamento(
   const agendamentoId = Number(entrada.id.slice('cancelar_agendamento_'.length));
 
   if (!agendamentoIds.includes(agendamentoId)) {
+    // proteção contra id fora da lista que foi oferecida (payload adulterado ou conversa velha)
     await enviarMensagemTexto(
       telefone,
       'Esse agendamento não está mais disponível pra cancelar por aqui.',
@@ -513,6 +535,7 @@ async function processarConfirmacaoCancelamento(
     await enviarMenu(telefone);
   } catch (error) {
     if (error instanceof AppError) {
+      // ex: regra de 24h não cumprida (pode ter mudado entre a listagem e a confirmação)
       await enviarMensagemTexto(telefone, error.message);
       await atualizarEstado(telefone, 'menu');
       await enviarMenu(telefone);
@@ -650,6 +673,7 @@ async function processarConfirmacaoRemarcacao(
     await enviarMenu(telefone);
   } catch (error) {
     if (error instanceof AppError) {
+      // horário ocupado por concorrência, ou caiu abaixo da antecedência mínima
       await enviarMensagemTexto(telefone, error.message);
       await exibirHorariosParaRemarcar(telefone, agendamentoId, profissionalId, duracaoMinutos);
       return;
@@ -657,6 +681,9 @@ async function processarConfirmacaoRemarcacao(
     throw error;
   }
 }
+
+// --- Atalho: gatilho vindo direto dos botões do template de lembrete (#37) ---
+// Chega com o ID do agendamento já definido no payload, sem precisar perguntar qual é (#7).
 
 async function processarGatilhoLembrete(
   telefone: string,
@@ -682,6 +709,9 @@ async function processarGatilhoLembrete(
     return;
   }
 
+  // garante que existe uma linha em `conversas` pra esse telefone antes de gravar estado,
+  // já que o gatilho pode ser a primeira interação vinda desse número (ex: agendamento
+  // criado pelo painel, sem o cliente nunca ter conversado com o bot antes)
   await buscarOuCriarConversa(telefone);
 
   if (acao === 'cancelar') {

@@ -1,5 +1,6 @@
 import { pool } from '@/infra/database';
 import { gerarHashSenha, verificarSenha } from '@/infra/senha';
+import { AppError } from '@/infra/errors';
 
 export type UsuarioAdmin = {
   id: number;
@@ -43,4 +44,21 @@ export async function invalidarSessoes(usuarioId: number): Promise<number> {
     [usuarioId],
   );
   return rows[0]?.versao_token;
+}
+
+// troca a senha e invalida qualquer sessão existente na mesma operação (se alguém
+// tinha acesso com a senha antiga, a troca não deveria deixar a sessão dele valendo)
+export async function redefinirSenha(email: string, novaSenha: string): Promise<UsuarioAdmin> {
+  const senhaHash = gerarHashSenha(novaSenha);
+  const { rows } = await pool.query(
+    `UPDATE usuarios_admin
+     SET senha_hash = $1, versao_token = versao_token + 1
+     WHERE email = $2
+     RETURNING id, email, role, telefone_notificacao, criado_em`,
+    [senhaHash, email],
+  );
+  if (rows.length === 0) {
+    throw new AppError('Usuário não encontrado', 404);
+  }
+  return rows[0];
 }

@@ -12,6 +12,7 @@ type StatusAtendimento = 'bot_ativo' | 'aguardando_humano' | 'humano_ativo' | 'e
 
 type Atendimento = {
   id: number;
+  cliente_id: number;
   cliente_nome: string | null;
   cliente_telefone: string;
   funcionario_email: string | null;
@@ -53,6 +54,9 @@ export default function AtendimentosPage() {
   const [rascunho, setRascunho] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [erroAcao, setErroAcao] = useState<string | null>(null);
+  const [editandoNome, setEditandoNome] = useState(false);
+  const [nomeRascunho, setNomeRascunho] = useState('');
+  const [salvandoNome, setSalvandoNome] = useState(false);
 
   const listaEstado = useApiPolling<Atendimento[]>('/api/atendimentos', INTERVALO_LISTA_MS);
   const mensagensEstado = useApiPolling<Mensagem[]>(
@@ -68,6 +72,31 @@ export default function AtendimentosPage() {
     { titulo: 'Em atendimento', status: 'humano_ativo' },
     { titulo: 'Encerradas', status: 'encerrado' },
   ];
+
+  function iniciarEdicaoNome() {
+    if (!selecionado) return;
+    setNomeRascunho(selecionado.cliente_nome ?? '');
+    setEditandoNome(true);
+  }
+
+  async function salvarNome(evento: FormEvent) {
+    evento.preventDefault();
+    if (!selecionado || !nomeRascunho.trim()) return;
+
+    setErroAcao(null);
+    setSalvandoNome(true);
+    try {
+      await apiFetch(`/api/clientes/${selecionado.cliente_id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ nome: nomeRascunho.trim() }),
+      });
+      setEditandoNome(false);
+    } catch (error) {
+      setErroAcao(error instanceof ApiError ? error.message : 'Erro inesperado');
+    } finally {
+      setSalvandoNome(false);
+    }
+  }
 
   async function assumir() {
     if (!selecionadoId) return;
@@ -133,7 +162,10 @@ export default function AtendimentosPage() {
                     {itens.map((atendimento) => (
                       <li key={atendimento.id}>
                         <button
-                          onClick={() => setSelecionadoId(atendimento.id)}
+                          onClick={() => {
+                            setSelecionadoId(atendimento.id);
+                            setEditandoNome(false);
+                          }}
                           className={`w-full rounded px-3 py-2 text-left text-sm transition-colors ${
                             selecionadoId === atendimento.id
                               ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
@@ -164,9 +196,40 @@ export default function AtendimentosPage() {
           <Card className="flex h-full flex-col">
             <div className="flex items-start justify-between border-b border-gray-200 pb-3 dark:border-gray-700">
               <div>
-                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                  {selecionado.cliente_nome ?? 'Cliente sem nome'}
-                </p>
+                {editandoNome ? (
+                  <form onSubmit={salvarNome} className="flex items-center gap-2">
+                    <input
+                      autoFocus
+                      value={nomeRascunho}
+                      onChange={(evento) => setNomeRascunho(evento.target.value)}
+                      className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                    />
+                    <button
+                      type="submit"
+                      disabled={salvandoNome || !nomeRascunho.trim()}
+                      className="text-xs font-medium text-gray-900 hover:underline disabled:opacity-50 dark:text-gray-100"
+                    >
+                      Salvar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditandoNome(false)}
+                      className="text-xs text-gray-500 hover:underline dark:text-gray-400"
+                    >
+                      Cancelar
+                    </button>
+                  </form>
+                ) : (
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    {selecionado.cliente_nome ?? 'Cliente sem nome'}{' '}
+                    <button
+                      onClick={iniciarEdicaoNome}
+                      className="text-xs font-normal text-gray-400 hover:underline dark:text-gray-500"
+                    >
+                      editar
+                    </button>
+                  </p>
+                )}
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   {selecionado.cliente_telefone}
                 </p>
