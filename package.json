@@ -16,7 +16,8 @@
     "migration:create": "node-pg-migrate -m infra/migrations create",
     "migration:up": "node-pg-migrate -m infra/migrations --envPath .env.development up",
     "admin:criar": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\"}' node -r ts-node/register -r tsconfig-paths/register scripts/criar-admin.ts",
-    "admin:resetar-senha": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\"}' node -r ts-node/register -r tsconfig-paths/register scripts/resetar-senha.ts"
+    "admin:resetar-senha": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\"}' node -r ts-node/register -r tsconfig-paths/register scripts/resetar-senha.ts",
+    "admin:excluir": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\"}' node -r ts-node/register -r tsconfig-paths/register scripts/excluir-admin.ts"
   },
   "dependencies": {
     "next": "16.3.4",

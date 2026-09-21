@@ -62,3 +62,10 @@ export async function redefinirSenha(email: string, novaSenha: string): Promise<
   }
   return rows[0];
 }
+
+export async function excluirUsuarioAdmin(email: string): Promise<void> {
+  const { rowCount } = await pool.query(`DELETE FROM usuarios_admin WHERE email = $1`, [email]);
+  if (!rowCount) {
+    throw new AppError('Usuário não encontrado', 404);
+  }
+}
