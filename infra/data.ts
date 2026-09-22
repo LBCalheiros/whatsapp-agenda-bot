@@ -22,6 +22,28 @@ export function fimDoDiaBRT(data: Date): Date {
   return paraInstanteReal(local);
 }
 
+export function criarDataBRT(data: string): Date {
+  const formatoValido = /^\d{4}-\d{2}-\d{2}$/.test(data);
+  if (!formatoValido) {
+    throw new Error('Data inválida, use o formato YYYY-MM-DD');
+  }
+
+  const instante = new Date(`${data}T12:00:00-03:00`);
+  if (Number.isNaN(instante.getTime())) {
+    throw new Error('Data inválida');
+  }
+
+  const dataNormalizada = instante.toLocaleDateString('en-CA', {
+    timeZone: FUSO_HORARIO,
+  });
+
+  if (dataNormalizada !== data) {
+    throw new Error('Data inválida');
+  }
+
+  return instante;
+}
+
 export function formatarDataHora(data: Date): string {
   return data.toLocaleString('pt-BR', {
     timeZone: FUSO_HORARIO,

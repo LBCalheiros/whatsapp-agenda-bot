@@ -1,5 +1,6 @@
 import { pool } from '@/infra/database';
 import { AppError } from '@/infra/errors';
+import { fimDoDiaBRT, inicioDoDiaBRT } from '@/infra/data';
 import { validarHorarioDisponivel } from '@/models/disponibilidade';
 
 type Agendamento = {
@@ -87,10 +88,8 @@ export async function listarAgendamentos(filtros: {
     condicoes.push(`a.data_hora >= $${valores.length} AND a.status != 'cancelado'`);
   }
   if (filtros.data) {
-    const inicioDia = new Date(filtros.data);
-    inicioDia.setHours(0, 0, 0, 0);
-    const fimDia = new Date(filtros.data);
-    fimDia.setHours(23, 59, 59, 999);
+    const inicioDia = inicioDoDiaBRT(filtros.data);
+    const fimDia = fimDoDiaBRT(filtros.data);
     valores.push(inicioDia, fimDia);
     condicoes.push(`a.data_hora BETWEEN $${valores.length - 1} AND $${valores.length}`);
   }

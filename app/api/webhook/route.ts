@@ -1,6 +1,7 @@
 import { logger } from '@/infra/logger';
 import { processarMensagem } from '@/models/conversa';
 import { reivindicarMensagem, liberarMensagem } from '@/infra/idempotenciaWebhook';
+import { verificarAssinaturaWebhook } from '@/infra/assinaturaWebhook';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -43,8 +44,28 @@ async function processarConteudo(numeroCliente: string, message: MensagemWhatsap
 }
 
 export async function POST(request: Request) {
-  const body = await request.json();
-  const message: MensagemWhatsapp | undefined = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+  const payload = await request.text();
+
+  if (!process.env.WHATSAPP_APP_SECRET) {
+    logger.error('WHATSAPP_APP_SECRET não configurado; webhook recusado');
+    return Response.json({ ok: false }, { status: 500 });
+  }
+
+  const assinatura = request.headers.get('x-hub-signature-256');
+  if (!verificarAssinaturaWebhook(payload, assinatura)) {
+    logger.warn('Webhook recusado: assinatura inválida');
+    return new Response('Forbidden', { status: 403 });
+  }
+
+  let body: { entry?: Array<{ changes?: Array<{ value?: { messages?: MensagemWhatsapp[] } }> }> };
+  try {
+    body = JSON.parse(payload);
+  } catch (error) {
+    logger.warn({ error }, 'Webhook recebeu JSON inválido');
+    return Response.json({ ok: false }, { status: 400 });
+  }
+
+  const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
 
   if (!message) {
     logger.info({ body }, 'Webhook recebido sem mensagem de cliente');
@@ -59,8 +80,6 @@ export async function POST(request: Request) {
     'Mensagem recebida do WhatsApp',
   );
 
-  // sem message.id não tem como garantir idempotência (não deveria acontecer na
-  // prática com a Meta, mas cobre payloads de teste feitos à mão); processa direto.
   if (!messageId) {
     logger.warn({ message }, 'Mensagem sem message.id — processando sem checagem de duplicidade');
     try {
@@ -82,9 +101,6 @@ export async function POST(request: Request) {
     await processarConteudo(numeroCliente, message);
     return Response.json({ ok: true });
   } catch (error) {
-    // libera a reivindicação: se a Meta reentregar essa mesma mensagem depois
-    // de um 500, queremos processar de verdade na próxima tentativa, não
-    // descartar como duplicata
     await liberarMensagem(messageId);
     logger.error({ error, messageId }, 'Erro ao processar webhook do WhatsApp');
     return Response.json({ ok: false }, { status: 500 });

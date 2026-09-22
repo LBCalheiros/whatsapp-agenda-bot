@@ -11,7 +11,6 @@ export function useApi<T>(caminho: string): Estado<T> {
 
   useEffect(() => {
     let ativo = true;
-    setEstado({ status: 'carregando' });
 
     apiFetch<T>(caminho)
       .then((dados) => {

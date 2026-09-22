@@ -2,8 +2,34 @@ import { AppError } from '@/infra/errors';
 import { logger } from '@/infra/logger';
 import { obterSessaoAtual } from '@/infra/autenticacaoMiddleware';
 import { validar } from '@/infra/validacao';
+import { criarDataBRT } from '@/infra/data';
 import { criarAgendamento, listarAgendamentos } from '@/models/agendamento';
 import { z } from 'zod';
+
+const STATUS_AGENDAMENTO = [
+  'agendado',
+  'confirmado',
+  'cancelado',
+  'completo',
+  'nao_compareceu',
+] as const;
+
+const schemaListarAgendamentos = z.object({
+  profissionalId: z.coerce.number().int().positive().optional(),
+  data: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use o formato YYYY-MM-DD')
+    .transform((valor, contexto) => {
+      try {
+        return criarDataBRT(valor);
+      } catch {
+        contexto.addIssue({ code: 'custom', message: 'Data inválida' });
+        return z.NEVER;
+      }
+    })
+    .optional(),
+  status: z.enum(STATUS_AGENDAMENTO).optional(),
+});
 
 const schemaCriarAgendamento = z.object({
   clienteId: z.number().int().positive(),
@@ -20,14 +46,12 @@ export async function GET(request: Request) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const profissionalId = searchParams.get('profissionalId');
-    const data = searchParams.get('data');
-    const status = searchParams.get('status');
+    const dados = validar(schemaListarAgendamentos, Object.fromEntries(searchParams.entries()));
 
     const agendamentos = await listarAgendamentos({
-      profissionalId: profissionalId ? Number(profissionalId) : undefined,
-      data: data ? new Date(data) : undefined,
-      status: status ?? undefined,
+      profissionalId: dados.profissionalId,
+      data: dados.data,
+      status: dados.status,
     });
 
     return Response.json(agendamentos);
