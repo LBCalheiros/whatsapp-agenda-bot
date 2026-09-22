@@ -1,7 +1,16 @@
 import { AppError } from '@/infra/errors';
 import { logger } from '@/infra/logger';
 import { obterSessaoAtual } from '@/infra/autenticacaoMiddleware';
+import { validar } from '@/infra/validacao';
 import { criarAgendamento, listarAgendamentos } from '@/models/agendamento';
+import { z } from 'zod';
+
+const schemaCriarAgendamento = z.object({
+  clienteId: z.number().int().positive(),
+  profissionalId: z.number().int().positive(),
+  servicoId: z.number().int().positive(),
+  dataHora: z.coerce.date(),
+});
 
 export async function GET(request: Request) {
   const sessao = await obterSessaoAtual();
@@ -39,12 +48,13 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
+    const dados = validar(schemaCriarAgendamento, body);
 
     const agendamento = await criarAgendamento({
-      clienteId: body.clienteId,
-      profissionalId: body.profissionalId,
-      servicoId: body.servicoId,
-      dataHora: new Date(body.dataHora),
+      clienteId: dados.clienteId,
+      profissionalId: dados.profissionalId,
+      servicoId: dados.servicoId,
+      dataHora: dados.dataHora,
     });
 
     return Response.json(agendamento, { status: 201 });

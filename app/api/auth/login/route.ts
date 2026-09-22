@@ -2,13 +2,26 @@ import { NextResponse } from 'next/server';
 import { autenticar } from '@/models/usuarioAdmin';
 import { criarTokenSessao, NOME_COOKIE_SESSAO, DURACAO_COOKIE_SEGUNDOS } from '@/infra/sessao';
 import { logger } from '@/infra/logger';
+import { AppError } from '@/infra/errors';
+import { validar } from '@/infra/validacao';
+import { z } from 'zod';
+
+const schemaLogin = z.object({
+  email: z.string().email(),
+  senha: z.string().min(1),
+});
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { email, senha } = body;
 
-  if (!email || !senha) {
-    return NextResponse.json({ erro: 'Email e senha são obrigatórios' }, { status: 400 });
+  let email: string, senha: string;
+  try {
+    ({ email, senha } = validar(schemaLogin, body));
+  } catch (error) {
+    if (error instanceof AppError) {
+      return NextResponse.json({ erro: error.message }, { status: error.statusCode });
+    }
+    throw error;
   }
 
   const usuario = await autenticar(email, senha);

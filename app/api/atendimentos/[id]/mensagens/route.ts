@@ -4,6 +4,12 @@ import { pool } from '@/infra/database';
 import { enviarMensagemTexto } from '@/infra/whatsapp';
 import { listarMensagens, registrarMensagem, buscarAtendimentoPorId } from '@/models/atendimento';
 import { AppError } from '@/infra/errors';
+import { validar } from '@/infra/validacao';
+import { z } from 'zod';
+
+const schemaEnviarMensagem = z.object({
+  texto: z.string().trim().min(1),
+});
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const sessao = await obterSessaoAtual();
@@ -25,13 +31,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const atendimentoId = Number(id);
   const body = await request.json();
-  const { texto } = body;
-
-  if (!texto) {
-    return NextResponse.json({ erro: 'Texto é obrigatório' }, { status: 400 });
-  }
 
   try {
+    const { texto } = validar(schemaEnviarMensagem, body);
     const atendimento = await buscarAtendimentoPorId(atendimentoId);
 
     if (atendimento.status === 'encerrado') {

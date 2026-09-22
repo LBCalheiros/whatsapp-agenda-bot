@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { obterSessaoAtual } from '@/infra/autenticacaoMiddleware';
 import { atualizarNomeCliente } from '@/models/cliente';
 import { AppError } from '@/infra/errors';
+import { validar } from '@/infra/validacao';
+import { z } from 'zod';
+
+const schemaAtualizarNome = z.object({
+  nome: z.string().trim().min(1),
+});
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const sessao = await obterSessaoAtual();
@@ -11,14 +17,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const { id } = await params;
   const body = await request.json();
-  const { nome } = body;
-
-  if (!nome || typeof nome !== 'string' || !nome.trim()) {
-    return NextResponse.json({ erro: 'Nome é obrigatório' }, { status: 400 });
-  }
 
   try {
-    const cliente = await atualizarNomeCliente(Number(id), nome.trim());
+    const { nome } = validar(schemaAtualizarNome, body);
+    const cliente = await atualizarNomeCliente(Number(id), nome);
     return NextResponse.json(cliente);
   } catch (error) {
     if (error instanceof AppError) {

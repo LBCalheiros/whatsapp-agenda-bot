@@ -1,5 +1,6 @@
 import { pool } from '@/infra/database';
 import { AppError } from '@/infra/errors';
+import { paraHorarioLocal, paraInstanteReal } from '@/infra/data';
 
 type RegraDisponibilidade = {
   id: number;
@@ -9,16 +10,6 @@ type RegraDisponibilidade = {
   horario_fim: string;
   intervalo_minutos: number;
 };
-
-const OFFSET_FUSO_MINUTOS = -3 * 60;
-
-function paraHorarioLocal(instante: Date): Date {
-  return new Date(instante.getTime() + OFFSET_FUSO_MINUTOS * 60_000);
-}
-
-function paraInstanteReal(horarioLocal: Date): Date {
-  return new Date(horarioLocal.getTime() - OFFSET_FUSO_MINUTOS * 60_000);
-}
 
 export async function criarRegraDisponibilidade(input: {
   profissionalId: number;

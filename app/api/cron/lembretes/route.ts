@@ -1,8 +1,13 @@
 import { logger } from '@/infra/logger';
 import { pool } from '@/infra/database';
 import { enviarMensagemTemplateComBotoes } from '@/infra/whatsapp';
-import { formatarDataHora } from '@/infra/data';
+import { formatarDataHora, inicioDoDiaBRT, fimDoDiaBRT } from '@/infra/data';
 
+// Nome e estrutura precisam bater exatamente com um template aprovado no Meta Business
+// Manager (corpo com 2 variáveis: data/hora e nome do serviço; 2 botões quick_reply).
+// Enquanto esse template não existir aprovado, essa rota vai falhar no envio real (a
+// query e o resto da lógica funcionam normalmente, só o enviarMensagemTemplateComBotoes
+// vai retornar erro da API do Meta).
 const NOME_TEMPLATE_LEMBRETE = 'lembrete_agendamento_24h';
 const IDIOMA_TEMPLATE = 'pt_BR';
 
@@ -13,10 +18,9 @@ export async function GET(request: Request) {
   }
 
   const amanha = new Date(Date.now() + 24 * 60 * 60 * 1000);
-  const inicioDia = new Date(amanha);
-  inicioDia.setHours(0, 0, 0, 0);
-  const fimDia = new Date(amanha);
-  fimDia.setHours(23, 59, 59, 999);
+  // limites do dia em horário de Brasília, não do servidor (que pode estar em UTC)
+  const inicioDia = inicioDoDiaBRT(amanha);
+  const fimDia = fimDoDiaBRT(amanha);
 
   const { rows: agendamentos } = await pool.query(
     `SELECT a.id, a.data_hora, c.telefone, s.nome AS servico_nome
@@ -53,6 +57,7 @@ export async function GET(request: Request) {
       ]);
       enviados++;
     } catch (error) {
+      // lembrete_enviado continua false de propósito, pra permitir reenvio manual pelo painel
       logger.error({ agendamentoId: agendamento.id, error }, 'Falha ao enviar lembrete de 24h');
       falhas++;
     }
