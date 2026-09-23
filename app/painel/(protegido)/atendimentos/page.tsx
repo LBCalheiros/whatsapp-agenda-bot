@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { ErrorState } from '@/components/ui/ErrorState';
+import Link from 'next/link';
 
 type StatusAtendimento = 'bot_ativo' | 'aguardando_humano' | 'humano_ativo' | 'encerrado';
 
@@ -243,6 +244,12 @@ export default function AtendimentosPage() {
                   Status: {ROTULOS_STATUS[selecionado.status]}
                   {selecionado.funcionario_email ? ` · ${selecionado.funcionario_email}` : ''}
                 </p>
+                <Link
+                  href={`/painel/agenda?cliente=${encodeURIComponent(selecionado.cliente_telefone)}`}
+                  className="mt-1 inline-block text-xs text-gray-500 hover:underline dark:text-gray-400"
+                >
+                  Ver agendamentos deste cliente →
+                </Link>
               </div>
 
               {selecionado.status === 'aguardando_humano' && (

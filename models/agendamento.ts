@@ -66,7 +66,8 @@ export async function listarAgendamentos(filtros: {
   profissionalId?: number;
   servicoId?: number;
   buscaCliente?: string;
-  data?: Date;
+  dataInicio?: Date;
+  dataFim?: Date;
   status?: string;
   apenasFuturos?: boolean;
 }) {
@@ -93,9 +94,9 @@ export async function listarAgendamentos(filtros: {
     valores.push(new Date());
     condicoes.push(`a.data_hora >= $${valores.length} AND a.status != 'cancelado'`);
   }
-  if (filtros.data) {
-    const inicioDia = inicioDoDiaBRT(filtros.data);
-    const fimDia = fimDoDiaBRT(filtros.data);
+  if (filtros.dataInicio && filtros.dataFim) {
+    const inicioDia = inicioDoDiaBRT(filtros.dataInicio);
+    const fimDia = fimDoDiaBRT(filtros.dataFim);
     valores.push(inicioDia, fimDia);
     condicoes.push(`a.data_hora BETWEEN $${valores.length - 1} AND $${valores.length}`);
   }

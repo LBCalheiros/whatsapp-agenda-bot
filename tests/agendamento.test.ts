@@ -52,12 +52,6 @@ describe('models/agendamento (integração)', () => {
     await pool.end();
   });
 
-  function dataFutura(horasNoFuturo: number): Date {
-    const data = new Date(Date.now() + horasNoFuturo * 60 * 60 * 1000);
-    data.setMinutes(data.getMinutes() < 30 ? 0 : 30, 0, 0);
-    return data;
-  }
-
   it('cria um agendamento válido', async () => {
     const dataHora = dataFutura(48);
     const agendamento = await criarAgendamento({ clienteId, profissionalId, servicoId, dataHora });

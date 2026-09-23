@@ -14,11 +14,8 @@ const STATUS_AGENDAMENTO = [
   'nao_compareceu',
 ] as const;
 
-const schemaListarAgendamentos = z.object({
-  profissionalId: z.coerce.number().int().positive().optional(),
-  servicoId: z.coerce.number().int().positive().optional(),
-  buscaCliente: z.string().min(1).optional(),
-  data: z
+function schemaData() {
+  return z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use o formato YYYY-MM-DD')
     .transform((valor, contexto) => {
@@ -29,7 +26,15 @@ const schemaListarAgendamentos = z.object({
         return z.NEVER;
       }
     })
-    .optional(),
+    .optional();
+}
+
+const schemaListarAgendamentos = z.object({
+  profissionalId: z.coerce.number().int().positive().optional(),
+  servicoId: z.coerce.number().int().positive().optional(),
+  buscaCliente: z.string().min(1).optional(),
+  dataInicio: schemaData(),
+  dataFim: schemaData(),
   status: z.enum(STATUS_AGENDAMENTO).optional(),
 });
 
@@ -54,7 +59,8 @@ export async function GET(request: Request) {
       profissionalId: dados.profissionalId,
       servicoId: dados.servicoId,
       buscaCliente: dados.buscaCliente,
-      data: dados.data,
+      dataInicio: dados.dataInicio,
+      dataFim: dados.dataFim,
       status: dados.status,
     });
 
