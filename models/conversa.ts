@@ -18,6 +18,7 @@ import {
   iniciarAtendimento,
   registrarMensagem,
 } from '@/models/atendimento';
+import { logger } from '@/infra/logger';
 
 const TIMEOUT_MINUTOS = 10;
 const DIAS_BUSCA_HORARIOS = 7;
@@ -201,10 +202,17 @@ async function processarMenu(telefone: string, entrada: Entrada) {
         const cliente = await buscarOuCriarClientePorTelefone(telefone);
         await iniciarAtendimento(cliente.id);
         await atualizarEstado(telefone, 'aguardando_atendente');
-        await enviarMensagemTexto(
-          telefone,
-          'Ok, um atendente vai falar com você em breve. Pode mandar sua mensagem por aqui.',
-        );
+        try {
+          await enviarMensagemTexto(
+            telefone,
+            'Ok, um atendente vai falar com você em breve. Pode mandar sua mensagem por aqui.',
+          );
+        } catch (error) {
+          logger.error(
+            { error, telefone },
+            'Falha ao enviar confirmação de atendimento ao cliente',
+          );
+        }
         return;
       }
     }
@@ -682,9 +690,6 @@ async function processarConfirmacaoRemarcacao(
   }
 }
 
-// --- Atalho: gatilho vindo direto dos botões do template de lembrete (#37) ---
-// Chega com o ID do agendamento já definido no payload, sem precisar perguntar qual é (#7).
-
 async function processarGatilhoLembrete(
   telefone: string,
   agendamentoId: number,
@@ -709,9 +714,6 @@ async function processarGatilhoLembrete(
     return;
   }
 
-  // garante que existe uma linha em `conversas` pra esse telefone antes de gravar estado,
-  // já que o gatilho pode ser a primeira interação vinda desse número (ex: agendamento
-  // criado pelo painel, sem o cliente nunca ter conversado com o bot antes)
   await buscarOuCriarConversa(telefone);
 
   if (acao === 'cancelar') {

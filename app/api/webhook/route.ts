@@ -57,7 +57,20 @@ export async function POST(request: Request) {
     return new Response('Forbidden', { status: 403 });
   }
 
-  let body: { entry?: Array<{ changes?: Array<{ value?: { messages?: MensagemWhatsapp[] } }> }> };
+  let body: {
+    entry?: Array<{
+      changes?: Array<{
+        value?: {
+          messages?: MensagemWhatsapp[];
+          statuses?: Array<{
+            status: string;
+            recipient_id: string;
+            errors?: Array<{ code: number; title: string }>;
+          }>;
+        };
+      }>;
+    }>;
+  };
   try {
     body = JSON.parse(payload);
   } catch (error) {
@@ -68,7 +81,15 @@ export async function POST(request: Request) {
   const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
 
   if (!message) {
-    logger.info({ body }, 'Webhook recebido sem mensagem de cliente');
+    const statuses = body.entry?.[0]?.changes?.[0]?.value?.statuses ?? [];
+    const falhas = statuses.filter((s) => s.status === 'failed');
+
+    if (falhas.length > 0) {
+      logger.error({ falhas }, 'Falha de entrega reportada pela Meta');
+    } else {
+      logger.info({ body }, 'Webhook recebido sem mensagem de cliente');
+    }
+
     return Response.json({ ok: true });
   }
 
