@@ -46,8 +46,6 @@ export async function invalidarSessoes(usuarioId: number): Promise<number> {
   return rows[0]?.versao_token;
 }
 
-// troca a senha e invalida qualquer sessão existente na mesma operação (se alguém
-// tinha acesso com a senha antiga, a troca não deveria deixar a sessão dele valendo)
 export async function redefinirSenha(email: string, novaSenha: string): Promise<UsuarioAdmin> {
   const senhaHash = gerarHashSenha(novaSenha);
   const { rows } = await pool.query(
@@ -68,4 +66,21 @@ export async function excluirUsuarioAdmin(email: string): Promise<void> {
   if (!rowCount) {
     throw new AppError('Usuário não encontrado', 404);
   }
+}
+
+export async function atualizarTelefoneNotificacao(
+  email: string,
+  telefoneNotificacao: string | null,
+): Promise<UsuarioAdmin> {
+  const { rows } = await pool.query(
+    `UPDATE usuarios_admin
+     SET telefone_notificacao = $1
+     WHERE email = $2
+     RETURNING id, email, role, telefone_notificacao, criado_em`,
+    [telefoneNotificacao, email],
+  );
+  if (rows.length === 0) {
+    throw new AppError('Usuário não encontrado', 404);
+  }
+  return rows[0];
 }
