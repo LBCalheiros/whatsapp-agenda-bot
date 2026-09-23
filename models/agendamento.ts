@@ -11,6 +11,7 @@ type Agendamento = {
   data_hora: string;
   status: string;
   lembrete_enviado: boolean;
+  observacoes: string | null;
 };
 
 export const ANTECEDENCIA_MINIMA_HORAS = 2;
@@ -63,7 +64,8 @@ export async function criarAgendamento(input: {
 
 export async function listarAgendamentos(filtros: {
   profissionalId?: number;
-  clienteId?: number;
+  servicoId?: number;
+  buscaCliente?: string;
   data?: Date;
   status?: string;
   apenasFuturos?: boolean;
@@ -75,9 +77,13 @@ export async function listarAgendamentos(filtros: {
     valores.push(filtros.profissionalId);
     condicoes.push(`a.profissional_id = $${valores.length}`);
   }
-  if (filtros.clienteId) {
-    valores.push(filtros.clienteId);
-    condicoes.push(`a.cliente_id = $${valores.length}`);
+  if (filtros.servicoId) {
+    valores.push(filtros.servicoId);
+    condicoes.push(`a.servico_id = $${valores.length}`);
+  }
+  if (filtros.buscaCliente) {
+    valores.push(`%${filtros.buscaCliente}%`);
+    condicoes.push(`(c.nome ILIKE $${valores.length} OR c.telefone ILIKE $${valores.length})`);
   }
   if (filtros.status) {
     valores.push(filtros.status);
@@ -120,6 +126,17 @@ export async function buscarPorId(agendamentoId: number): Promise<Agendamento> {
     throw new AppError('Agendamento não encontrado', 404);
   }
   return rows[0];
+}
+
+export async function atualizarObservacoes(agendamentoId: number, observacoes: string | null) {
+  const { rows } = await pool.query(
+    `UPDATE agendamentos SET observacoes = $1 WHERE id = $2 RETURNING *`,
+    [observacoes, agendamentoId],
+  );
+  if (rows.length === 0) {
+    throw new AppError('Agendamento não encontrado', 404);
+  }
+  return rows[0] as Agendamento;
 }
 
 export async function cancelarAgendamento(agendamentoId: number) {
@@ -165,6 +182,38 @@ export async function reagendarAgendamento(agendamentoId: number, novaDataHora: 
     `UPDATE agendamentos SET data_hora = $1, lembrete_enviado = false WHERE id = $2`,
     [novaDataHora, agendamentoId],
   );
+
+  await registrarHistorico(
+    agendamentoId,
+    agendamento.status,
+    agendamento.status,
+    agendamento.data_hora,
+  );
+}
+
+// Usada só pelo painel (admin), diferente de reagendarAgendamento (usada pelo bot):
+// sem checagem de antecedência mínima nem de disponibilidade, o admin decide
+// livremente qualquer data/hora. A única proteção que resta é a constraint única
+// do banco (profissional_id + data_hora), que barra apenas timestamp idêntico,
+// não sobreposição por duração.
+export async function reagendarComoAdmin(agendamentoId: number, novaDataHora: Date) {
+  const agendamento = await buscarPorId(agendamentoId);
+
+  function ehViolacaoDeConstraintUnica(error: unknown): error is { code: string } {
+    return typeof error === 'object' && error !== null && 'code' in error;
+  }
+
+  try {
+    await pool.query(
+      `UPDATE agendamentos SET data_hora = $1, lembrete_enviado = false WHERE id = $2`,
+      [novaDataHora, agendamentoId],
+    );
+  } catch (error) {
+    if (ehViolacaoDeConstraintUnica(error) && error.code === '23505') {
+      throw new AppError('Já existe um agendamento nesse exato horário para esse profissional');
+    }
+    throw error;
+  }
 
   await registrarHistorico(
     agendamentoId,

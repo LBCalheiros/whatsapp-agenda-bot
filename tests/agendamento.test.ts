@@ -6,12 +6,8 @@ import {
   cancelarComoCliente,
   reagendarAgendamento,
 } from '@/models/agendamento';
+import { paraHorarioLocal } from '@/infra/data';
 
-/**
- * Estes testes precisam do Postgres local rodando (docker compose up) e das
- * migrations aplicadas — não são unitários puros, são de integração de verdade,
- * igual o resto do projeto sempre foi validado (via curl contra o banco real).
- */
 describe('models/agendamento (integração)', () => {
   let profissionalId: number;
   let servicoId: number;
@@ -140,3 +136,14 @@ describe('models/agendamento (integração)', () => {
     expect(rows.length).toBeGreaterThan(0);
   });
 });
+
+function dataFutura(horasNoFuturo: number): Date {
+  const data = new Date(Date.now() + horasNoFuturo * 60 * 60 * 1000);
+  data.setMinutes(data.getMinutes() < 30 ? 0 : 30, 0, 0);
+  const local = paraHorarioLocal(data);
+  if (local.getUTCHours() === 23 && local.getUTCMinutes() === 30) {
+    data.setTime(data.getTime() - 30 * 60_000);
+  }
+
+  return data;
+}

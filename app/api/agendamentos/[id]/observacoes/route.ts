@@ -2,11 +2,11 @@ import { AppError } from '@/infra/errors';
 import { logger } from '@/infra/logger';
 import { obterSessaoAtual } from '@/infra/autenticacaoMiddleware';
 import { validar } from '@/infra/validacao';
-import { reagendarComoAdmin } from '@/models/agendamento';
+import { atualizarObservacoes } from '@/models/agendamento';
 import { z } from 'zod';
 
-const schemaReagendar = z.object({
-  novaDataHora: z.coerce.date(),
+const schemaObservacoes = z.object({
+  observacoes: z.string().nullable(),
 });
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -18,9 +18,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try {
     const { id } = await params;
     const body = await request.json();
-    const dados = validar(schemaReagendar, body);
-    await reagendarComoAdmin(Number(id), dados.novaDataHora);
-    return Response.json({ ok: true });
+    const dados = validar(schemaObservacoes, body);
+    const agendamento = await atualizarObservacoes(Number(id), dados.observacoes);
+    return Response.json(agendamento);
   } catch (error) {
     if (error instanceof AppError) {
       return Response.json({ error: error.message }, { status: error.statusCode });

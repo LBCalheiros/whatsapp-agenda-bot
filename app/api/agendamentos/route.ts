@@ -16,6 +16,8 @@ const STATUS_AGENDAMENTO = [
 
 const schemaListarAgendamentos = z.object({
   profissionalId: z.coerce.number().int().positive().optional(),
+  servicoId: z.coerce.number().int().positive().optional(),
+  buscaCliente: z.string().min(1).optional(),
   data: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use o formato YYYY-MM-DD')
@@ -50,6 +52,8 @@ export async function GET(request: Request) {
 
     const agendamentos = await listarAgendamentos({
       profissionalId: dados.profissionalId,
+      servicoId: dados.servicoId,
+      buscaCliente: dados.buscaCliente,
       data: dados.data,
       status: dados.status,
     });
