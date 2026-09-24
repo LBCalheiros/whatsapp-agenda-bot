@@ -15,6 +15,7 @@ type Agendamento = {
 };
 
 export const ANTECEDENCIA_MINIMA_HORAS = 2;
+const DIAS_HISTORICO = 30;
 
 export async function criarAgendamento(input: {
   clienteId: number;
@@ -70,6 +71,7 @@ export async function listarAgendamentos(filtros: {
   dataFim?: Date;
   status?: string;
   apenasFuturos?: boolean;
+  historico?: boolean;
 }) {
   const condicoes: string[] = [];
   const valores: unknown[] = [];
@@ -94,6 +96,22 @@ export async function listarAgendamentos(filtros: {
     valores.push(new Date());
     condicoes.push(`a.data_hora >= $${valores.length} AND a.status != 'cancelado'`);
   }
+  if (filtros.historico) {
+    const agora = new Date();
+    const limite = new Date(agora.getTime() - DIAS_HISTORICO * 24 * 60 * 60 * 1000);
+    valores.push(limite, agora);
+    const iLimite = valores.length - 1;
+    const iAgora = valores.length;
+    condicoes.push(`(
+      (a.status = 'completo' AND a.data_hora BETWEEN $${iLimite} AND $${iAgora})
+      OR (a.status = 'cancelado' AND EXISTS (
+        SELECT 1 FROM historico_agendamentos h
+        WHERE h.agendamento_id = a.id
+          AND h.status_novo = 'cancelado'
+          AND h.alterado_em BETWEEN $${iLimite} AND $${iAgora}
+      ))
+    )`);
+  }
   if (filtros.dataInicio && filtros.dataFim) {
     const inicioDia = inicioDoDiaBRT(filtros.dataInicio);
     const fimDia = fimDoDiaBRT(filtros.dataFim);
@@ -102,6 +120,7 @@ export async function listarAgendamentos(filtros: {
   }
 
   const where = condicoes.length > 0 ? `WHERE ${condicoes.join(' AND ')}` : '';
+  const ordem = filtros.historico ? 'a.data_hora DESC' : 'a.data_hora ASC';
 
   const { rows } = await pool.query(
     `SELECT
@@ -114,7 +133,7 @@ export async function listarAgendamentos(filtros: {
      JOIN profissionais p ON p.id = a.profissional_id
      JOIN servicos s ON s.id = a.servico_id
      ${where}
-     ORDER BY a.data_hora`,
+     ORDER BY ${ordem}`,
     valores,
   );
 

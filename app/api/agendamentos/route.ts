@@ -36,6 +36,8 @@ const schemaListarAgendamentos = z.object({
   dataInicio: schemaData(),
   dataFim: schemaData(),
   status: z.enum(STATUS_AGENDAMENTO).optional(),
+  apenasFuturos: z.coerce.boolean().optional(),
+  historico: z.coerce.boolean().optional(),
 });
 
 const schemaCriarAgendamento = z.object({
@@ -62,6 +64,8 @@ export async function GET(request: Request) {
       dataInicio: dados.dataInicio,
       dataFim: dados.dataFim,
       status: dados.status,
+      apenasFuturos: dados.apenasFuturos,
+      historico: dados.historico,
     });
 
     return Response.json(agendamentos);

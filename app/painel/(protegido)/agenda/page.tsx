@@ -1,16 +1,17 @@
 'use client';
 
 import { useMemo, useState, FormEvent } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useApiPolling } from '@/hooks/useApiPolling';
 import { apiFetch, ApiError } from '@/lib/apiClient';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { ErrorState } from '@/components/ui/ErrorState';
-import { useSearchParams } from 'next/navigation';
 
 type StatusAgendamento = 'agendado' | 'confirmado' | 'cancelado' | 'completo' | 'nao_compareceu';
 
+type Aba = 'proximos' | 'historico';
 type Periodo = 'todos' | 'hoje' | 'semana' | 'mes';
 
 type Agendamento = {
@@ -74,9 +75,14 @@ function linkWhatsapp(telefone: string): string {
 
 export default function AgendaPage() {
   const searchParams = useSearchParams();
+
+  const [aba, setAba] = useState<Aba>('proximos');
   const [periodo, setPeriodo] = useState<Periodo>('todos');
   const [filtroServicoId, setFiltroServicoId] = useState('');
   const [filtroCliente, setFiltroCliente] = useState(searchParams.get('cliente') ?? '');
+  const [filtroStatusHistorico, setFiltroStatusHistorico] = useState<'' | 'cancelado' | 'completo'>(
+    '',
+  );
 
   const [selecionadoId, setSelecionadoId] = useState<number | null>(null);
   const [editandoNome, setEditandoNome] = useState(false);
@@ -92,16 +98,23 @@ export default function AgendaPage() {
   const servicos = servicosEstado.status === 'sucesso' ? servicosEstado.dados : [];
 
   // "hoje" cobre só o dia de hoje; "semana"/"mes" vão de hoje até +7/+30 dias.
+  // Só se aplica na aba "Próximos" — "Histórico" tem período fixo de 30 dias.
   const { dataInicio, dataFim } = useMemo(() => {
-    if (periodo === 'todos') return { dataInicio: '', dataFim: '' };
+    if (aba === 'historico' || periodo === 'todos') return { dataInicio: '', dataFim: '' };
     const hoje = new Date();
     const dias = periodo === 'hoje' ? 0 : periodo === 'semana' ? 7 : 30;
     const fim = new Date(hoje.getTime() + dias * 24 * 60 * 60 * 1000);
     return { dataInicio: paraDataYYYYMMDD(hoje), dataFim: paraDataYYYYMMDD(fim) };
-  }, [periodo]);
+  }, [aba, periodo]);
 
   const caminhoLista = useMemo(() => {
     const params = new URLSearchParams();
+    if (aba === 'proximos') {
+      params.set('apenasFuturos', 'true');
+    } else {
+      params.set('historico', 'true');
+      if (filtroStatusHistorico) params.set('status', filtroStatusHistorico);
+    }
     if (dataInicio && dataFim) {
       params.set('dataInicio', dataInicio);
       params.set('dataFim', dataFim);
@@ -110,7 +123,7 @@ export default function AgendaPage() {
     if (filtroCliente.trim()) params.set('buscaCliente', filtroCliente.trim());
     params.set('_r', String(refreshKey));
     return `/api/agendamentos?${params.toString()}`;
-  }, [dataInicio, dataFim, filtroServicoId, filtroCliente, refreshKey]);
+  }, [aba, dataInicio, dataFim, filtroServicoId, filtroCliente, refreshKey]);
 
   const listaEstado = useApiPolling<Agendamento[]>(caminhoLista, INTERVALO_LISTA_MS);
   const lista = listaEstado.status === 'sucesso' ? listaEstado.dados : [];
@@ -118,6 +131,14 @@ export default function AgendaPage() {
 
   function forcarAtualizacao() {
     setRefreshKey((k) => k + 1);
+  }
+
+  function trocarAba(novaAba: Aba) {
+    setAba(novaAba);
+    setFiltroStatusHistorico('');
+    setSelecionadoId(null);
+    setEditandoNome(false);
+    setErroAcao(null);
   }
 
   function selecionar(agendamento: Agendamento) {
@@ -214,17 +235,55 @@ export default function AgendaPage() {
       <div className="w-80 shrink-0 overflow-y-auto">
         <h1 className="mb-4 text-2xl font-semibold text-gray-900 dark:text-gray-100">Agenda</h1>
 
-        <div className="mb-4 flex flex-col gap-2">
-          <select
-            value={periodo}
-            onChange={(e) => setPeriodo(e.target.value as Periodo)}
-            className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+        <div className="mb-4 flex gap-1 rounded-md bg-gray-100 p-1 dark:bg-gray-800">
+          <button
+            onClick={() => trocarAba('proximos')}
+            className={`flex-1 rounded px-2 py-1.5 text-sm font-medium transition-colors ${
+              aba === 'proximos'
+                ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+                : 'text-gray-500 dark:text-gray-400'
+            }`}
           >
-            <option value="todos">Todos os períodos</option>
-            <option value="hoje">Hoje</option>
-            <option value="semana">Próximos 7 dias</option>
-            <option value="mes">Próximo mês</option>
-          </select>
+            Próximos
+          </button>
+          <button
+            onClick={() => trocarAba('historico')}
+            className={`flex-1 rounded px-2 py-1.5 text-sm font-medium transition-colors ${
+              aba === 'historico'
+                ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+                : 'text-gray-500 dark:text-gray-400'
+            }`}
+          >
+            Histórico
+          </button>
+        </div>
+
+        <div className="mb-4 flex flex-col gap-2">
+          {aba === 'proximos' && (
+            <select
+              value={periodo}
+              onChange={(e) => setPeriodo(e.target.value as Periodo)}
+              className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+            >
+              <option value="todos">Todos os períodos</option>
+              <option value="hoje">Hoje</option>
+              <option value="semana">Próximos 7 dias</option>
+              <option value="mes">Próximo mês</option>
+            </select>
+          )}
+          {aba === 'historico' && (
+            <select
+              value={filtroStatusHistorico}
+              onChange={(e) =>
+                setFiltroStatusHistorico(e.target.value as typeof filtroStatusHistorico)
+              }
+              className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+            >
+              <option value="">Cancelados e concluídos</option>
+              <option value="cancelado">Só cancelados</option>
+              <option value="completo">Só concluídos</option>
+            </select>
+          )}
           <select
             value={filtroServicoId}
             onChange={(e) => setFiltroServicoId(e.target.value)}
@@ -271,6 +330,7 @@ export default function AgendaPage() {
                   </div>
                   <div className="text-xs opacity-75">
                     {formatarDataHora(agendamento.data_hora)} · {agendamento.servico_nome}
+                    {aba === 'historico' ? ` · ${ROTULOS_STATUS[agendamento.status]}` : ''}
                   </div>
                 </button>
               </li>
@@ -346,49 +406,68 @@ export default function AgendaPage() {
 
             {erroAcao && <ErrorState mensagem={erroAcao} />}
 
-            <div>
-              <h2 className="mb-2 text-xs font-semibold tracking-wide text-gray-500 uppercase dark:text-gray-400">
-                Reagendar
-              </h2>
-              <form onSubmit={reagendar} className="flex items-center gap-2">
-                <input
-                  type="datetime-local"
-                  value={novaDataHora}
-                  onChange={(e) => setNovaDataHora(e.target.value)}
-                  className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-                />
-                <Button type="submit" disabled={salvando || !novaDataHora}>
-                  Confirmar
-                </Button>
-              </form>
-              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                Sem checagem de disponibilidade — qualquer horário é aceito.
-              </p>
-            </div>
+            {aba === 'proximos' && (
+              <>
+                <div>
+                  <h2 className="mb-2 text-xs font-semibold tracking-wide text-gray-500 uppercase dark:text-gray-400">
+                    Reagendar
+                  </h2>
+                  <form onSubmit={reagendar} className="flex items-center gap-2">
+                    <input
+                      type="datetime-local"
+                      value={novaDataHora}
+                      onChange={(e) => setNovaDataHora(e.target.value)}
+                      className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                    />
+                    <Button type="submit" disabled={salvando || !novaDataHora}>
+                      Confirmar
+                    </Button>
+                  </form>
+                  <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                    Sem checagem de disponibilidade — qualquer horário é aceito.
+                  </p>
+                </div>
 
-            <div>
-              <h2 className="mb-2 text-xs font-semibold tracking-wide text-gray-500 uppercase dark:text-gray-400">
-                Observações
-              </h2>
-              <form onSubmit={salvarObservacoes} className="flex flex-col gap-2">
-                <textarea
-                  value={observacoesRascunho}
-                  onChange={(e) => setObservacoesRascunho(e.target.value)}
-                  rows={4}
-                  placeholder="Nenhuma observação..."
-                  className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-                />
-                <Button type="submit" disabled={salvando} className="self-start">
-                  Salvar observações
-                </Button>
-              </form>
-            </div>
+                <div>
+                  <h2 className="mb-2 text-xs font-semibold tracking-wide text-gray-500 uppercase dark:text-gray-400">
+                    Observações
+                  </h2>
+                  <form onSubmit={salvarObservacoes} className="flex flex-col gap-2">
+                    <textarea
+                      value={observacoesRascunho}
+                      onChange={(e) => setObservacoesRascunho(e.target.value)}
+                      rows={4}
+                      placeholder="Nenhuma observação..."
+                      className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                    />
+                    <Button type="submit" disabled={salvando} className="self-start">
+                      Salvar observações
+                    </Button>
+                  </form>
+                </div>
 
-            {selecionado.status !== 'cancelado' && (
-              <div className="mt-auto border-t border-gray-200 pt-3 dark:border-gray-700">
-                <Button variante="secundario" onClick={cancelar} disabled={salvando}>
-                  Cancelar agendamento
-                </Button>
+                {selecionado.status !== 'cancelado' && (
+                  <div className="mt-auto border-t border-gray-200 pt-3 dark:border-gray-700">
+                    <Button variante="secundario" onClick={cancelar} disabled={salvando}>
+                      Cancelar agendamento
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+
+            {aba === 'historico' && (
+              <div>
+                <h2 className="mb-2 text-xs font-semibold tracking-wide text-gray-500 uppercase dark:text-gray-400">
+                  Observações
+                </h2>
+                <p className="text-sm text-gray-700 dark:text-gray-300">
+                  {selecionado.observacoes || 'Nenhuma observação registrada.'}
+                </p>
+                <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
+                  Agendamentos do histórico não podem ser reagendados ou ter observações editadas —
+                  use a aba "Próximos" pra agendamentos futuros.
+                </p>
               </div>
             )}
           </Card>

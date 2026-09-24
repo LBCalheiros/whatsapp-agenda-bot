@@ -25,6 +25,24 @@ type MensagemWhatsapp = {
   button?: { payload: string };
 };
 
+type StatusEntrega = {
+  status: string;
+  recipient_id: string;
+  errors?: Array<{ code: number; title: string }>;
+};
+
+// Log enxuto e sem dado sensível: nunca inclui o corpo da mensagem do cliente
+// (message.text.body), só o suficiente pra depurar o roteamento.
+function resumirMensagem(message: MensagemWhatsapp) {
+  const resumo: Record<string, unknown> = { id: message.id, tipo: message.type };
+  if (message.type === 'interactive') {
+    resumo.botao = message.interactive?.button_reply?.id;
+  } else if (message.type === 'button') {
+    resumo.botao = message.button?.payload;
+  }
+  return resumo;
+}
+
 async function processarConteudo(numeroCliente: string, message: MensagemWhatsapp) {
   const tipoMensagem = message.type;
 
@@ -62,11 +80,7 @@ export async function POST(request: Request) {
       changes?: Array<{
         value?: {
           messages?: MensagemWhatsapp[];
-          statuses?: Array<{
-            status: string;
-            recipient_id: string;
-            errors?: Array<{ code: number; title: string }>;
-          }>;
+          statuses?: StatusEntrega[];
         };
       }>;
     }>;
@@ -87,7 +101,7 @@ export async function POST(request: Request) {
     if (falhas.length > 0) {
       logger.error({ falhas }, 'Falha de entrega reportada pela Meta');
     } else {
-      logger.info({ body }, 'Webhook recebido sem mensagem de cliente');
+      logger.info({ quantidade: statuses.length }, 'Webhook recebido sem mensagem de cliente');
     }
 
     return Response.json({ ok: true });
@@ -96,13 +110,13 @@ export async function POST(request: Request) {
   const numeroCliente = message.from;
   const messageId = message.id;
 
-  logger.info(
-    { numeroCliente, tipoMensagem: message.type, message },
-    'Mensagem recebida do WhatsApp',
-  );
+  logger.info({ numeroCliente, ...resumirMensagem(message) }, 'Mensagem recebida do WhatsApp');
 
   if (!messageId) {
-    logger.warn({ message }, 'Mensagem sem message.id — processando sem checagem de duplicidade');
+    logger.warn(
+      { numeroCliente },
+      'Mensagem sem message.id — processando sem checagem de duplicidade',
+    );
     try {
       await processarConteudo(numeroCliente, message);
       return Response.json({ ok: true });
