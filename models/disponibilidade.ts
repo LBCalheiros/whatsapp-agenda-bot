@@ -11,6 +11,15 @@ type RegraDisponibilidade = {
   intervalo_minutos: number;
 };
 
+function validarRegra(horarioInicio: string, horarioFim: string, intervaloMinutos: number) {
+  if (horarioInicio >= horarioFim) {
+    throw new AppError('Horário inicial precisa ser antes do horário final');
+  }
+  if (intervaloMinutos <= 0) {
+    throw new AppError('Intervalo entre consultas precisa ser maior que zero');
+  }
+}
+
 export async function criarRegraDisponibilidade(input: {
   profissionalId: number;
   diaSemana: number;
@@ -23,12 +32,7 @@ export async function criarRegraDisponibilidade(input: {
   if (diaSemana < 0 || diaSemana > 6) {
     throw new AppError('Dia da semana inválido, use um número de 0 (domingo) a 6 (sábado)');
   }
-  if (horarioInicio >= horarioFim) {
-    throw new AppError('Horário inicial precisa ser antes do horário final');
-  }
-  if (intervaloMinutos <= 0) {
-    throw new AppError('Intervalo entre consultas precisa ser maior que zero');
-  }
+  validarRegra(horarioInicio, horarioFim, intervaloMinutos);
 
   const { rows } = await pool.query(
     `INSERT INTO regras_disponibilidade
@@ -39,6 +43,48 @@ export async function criarRegraDisponibilidade(input: {
   );
 
   return rows[0] as RegraDisponibilidade;
+}
+
+// Cria a regra do dia se não existir, ou atualiza se já existir — depende da
+// constraint única (profissional_id, dia_semana). Usada pela tela do painel,
+// onde o usuário só pensa em "editar o horário de terça", não em criar vs. atualizar.
+export async function upsertRegraDisponibilidade(input: {
+  profissionalId: number;
+  diaSemana: number;
+  horarioInicio: string;
+  horarioFim: string;
+  intervaloMinutos: number;
+}) {
+  const { profissionalId, diaSemana, horarioInicio, horarioFim, intervaloMinutos } = input;
+
+  if (diaSemana < 0 || diaSemana > 6) {
+    throw new AppError('Dia da semana inválido, use um número de 0 (domingo) a 6 (sábado)');
+  }
+  validarRegra(horarioInicio, horarioFim, intervaloMinutos);
+
+  const { rows } = await pool.query(
+    `INSERT INTO regras_disponibilidade
+       (profissional_id, dia_semana, horario_inicio, horario_fim, intervalo_minutos)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (profissional_id, dia_semana)
+     DO UPDATE SET
+       horario_inicio = EXCLUDED.horario_inicio,
+       horario_fim = EXCLUDED.horario_fim,
+       intervalo_minutos = EXCLUDED.intervalo_minutos
+     RETURNING *`,
+    [profissionalId, diaSemana, horarioInicio, horarioFim, intervaloMinutos],
+  );
+
+  return rows[0] as RegraDisponibilidade;
+}
+
+// Remove a regra do dia — na prática, "fechar" esse dia da semana (sem
+// regra, consultarHorariosDisponiveis não oferece nenhum horário nele).
+export async function removerRegraDisponibilidade(profissionalId: number, diaSemana: number) {
+  await pool.query(
+    `DELETE FROM regras_disponibilidade WHERE profissional_id = $1 AND dia_semana = $2`,
+    [profissionalId, diaSemana],
+  );
 }
 
 export async function listarRegras(profissionalId: number) {
@@ -69,6 +115,37 @@ export async function criarBloqueio(input: {
   );
 
   return rows[0];
+}
+
+// Só bloqueios que ainda não terminaram — os passados não afetam mais nenhum
+// agendamento futuro, então não tem por que a tela mostrar pra sempre.
+export async function listarBloqueios(profissionalId: number) {
+  const { rows } = await pool.query(
+    `SELECT * FROM indisponibilidades
+     WHERE profissional_id = $1 AND fim >= now()
+     ORDER BY inicio`,
+    [profissionalId],
+  );
+  return rows;
+}
+
+export async function removerBloqueio(bloqueioId: number) {
+  const { rowCount } = await pool.query(`DELETE FROM indisponibilidades WHERE id = $1`, [
+    bloqueioId,
+  ]);
+  if (rowCount === 0) {
+    throw new AppError('Bloqueio não encontrado', 404);
+  }
+}
+
+export async function obterProfissionalPadrao(): Promise<number> {
+  const { rows } = await pool.query(
+    `SELECT id FROM profissionais WHERE ativo = true ORDER BY id LIMIT 1`,
+  );
+  if (rows.length === 0) {
+    throw new AppError('Nenhum profissional ativo cadastrado', 404);
+  }
+  return rows[0].id;
 }
 
 export async function consultarHorariosDisponiveis(

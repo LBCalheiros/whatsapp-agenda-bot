@@ -231,8 +231,8 @@ export default function AgendaPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-3rem)] gap-6">
-      <div className="w-80 shrink-0 overflow-y-auto">
+    <div className="flex flex-col gap-6 md:h-[calc(100vh-3rem)] md:flex-row">
+      <div className="w-full shrink-0 overflow-y-auto md:w-80">
         <h1 className="mb-4 text-2xl font-semibold text-gray-900 dark:text-gray-100">Agenda</h1>
 
         <div className="mb-4 flex gap-1 rounded-md bg-gray-100 p-1 dark:bg-gray-800">
@@ -341,7 +341,7 @@ export default function AgendaPage() {
 
       <div className="flex-1">
         {!selecionado && (
-          <Card className="flex h-full items-center justify-center">
+          <Card className="flex md:h-full items-center justify-center">
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Selecione um agendamento à esquerda.
             </p>
@@ -349,7 +349,7 @@ export default function AgendaPage() {
         )}
 
         {selecionado && (
-          <Card className="flex h-full flex-col gap-4 overflow-y-auto">
+          <Card className="flex md:h-full flex-col gap-4 overflow-y-auto">
             <div className="border-b border-gray-200 pb-3 dark:border-gray-700">
               {editandoNome ? (
                 <form onSubmit={salvarNome} className="flex items-center gap-2">

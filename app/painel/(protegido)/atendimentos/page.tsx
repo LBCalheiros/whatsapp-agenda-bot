@@ -139,8 +139,8 @@ export default function AtendimentosPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-3rem)] gap-6">
-      <div className="w-72 shrink-0 overflow-y-auto">
+    <div className="flex flex-col gap-6 md:h-[calc(100vh-3rem)] md:flex-row">
+      <div className="w-full shrink-0 overflow-y-auto md:w-80">
         <h1 className="mb-4 text-2xl font-semibold text-gray-900 dark:text-gray-100">
           Atendimentos
         </h1>
@@ -186,7 +186,7 @@ export default function AtendimentosPage() {
 
       <div className="flex-1">
         {!selecionado && (
-          <Card className="flex h-full items-center justify-center">
+          <Card className="flex md:h-full items-center justify-center">
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Selecione uma conversa à esquerda.
             </p>
@@ -194,7 +194,7 @@ export default function AtendimentosPage() {
         )}
 
         {selecionado && (
-          <Card className="flex h-full flex-col">
+          <Card className="flex md:h-full flex-col">
             <div className="flex items-start justify-between border-b border-gray-200 pb-3 dark:border-gray-700">
               <div>
                 {editandoNome ? (
