@@ -123,7 +123,7 @@ export default function AgendaPage() {
     if (filtroCliente.trim()) params.set('buscaCliente', filtroCliente.trim());
     params.set('_r', String(refreshKey));
     return `/api/agendamentos?${params.toString()}`;
-  }, [aba, dataInicio, dataFim, filtroServicoId, filtroCliente, refreshKey]);
+  }, [aba, dataInicio, dataFim, filtroServicoId, filtroCliente, filtroStatusHistorico, refreshKey]);
 
   const listaEstado = useApiPolling<Agendamento[]>(caminhoLista, INTERVALO_LISTA_MS);
   const lista = listaEstado.status === 'sucesso' ? listaEstado.dados : [];
@@ -466,7 +466,7 @@ export default function AgendaPage() {
                 </p>
                 <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
                   Agendamentos do histórico não podem ser reagendados ou ter observações editadas —
-                  use a aba "Próximos" pra agendamentos futuros.
+                  use a aba &quot;Próximos&quot; pra agendamentos futuros.
                 </p>
               </div>
             )}

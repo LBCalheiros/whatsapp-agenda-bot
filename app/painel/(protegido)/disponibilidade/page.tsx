@@ -149,9 +149,7 @@ function LinhaDia({
 
   return (
     <div className="flex items-center justify-between border-b border-gray-100 py-2 last:border-0 dark:border-gray-800">
-      <span className="w-32 text-sm text-gray-900 dark:text-gray-100">
-        {NOMES_DIAS[diaSemana]}
-      </span>
+      <span className="w-32 text-sm text-gray-900 dark:text-gray-100">{NOMES_DIAS[diaSemana]}</span>
       {regra ? (
         <span className="flex-1 text-sm text-gray-600 dark:text-gray-400">
           {regra.horario_inicio.slice(0, 5)} às {regra.horario_fim.slice(0, 5)} ·{' '}

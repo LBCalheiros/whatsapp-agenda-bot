@@ -8,7 +8,7 @@ export async function GET() {
     return NextResponse.json({ erro: 'Não autenticado' }, { status: 401 });
   }
 
-  const { rows } = await pool.query(`SELECT email, role FROM usuarios_admin WHERE id = $1`, [
+  const { rows } = await pool.query(`SELECT id, email, role FROM usuarios_admin WHERE id = $1`, [
     sessao.usuarioId,
   ]);
 
@@ -16,5 +16,5 @@ export async function GET() {
     return NextResponse.json({ erro: 'Não autenticado' }, { status: 401 });
   }
 
-  return NextResponse.json({ email: rows[0].email, role: rows[0].role });
+  return NextResponse.json({ id: rows[0].id, email: rows[0].email, role: rows[0].role });
 }
