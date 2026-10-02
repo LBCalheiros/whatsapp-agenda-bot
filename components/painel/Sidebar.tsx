@@ -11,6 +11,7 @@ const ITENS_NAV = [
   { href: '/painel/atendimentos', label: 'Atendimentos' },
   { href: '/painel/agenda', label: 'Agenda' },
   { href: '/painel/disponibilidade', label: 'Disponibilidade' },
+  { href: '/painel/servicos', label: 'Serviços' },
   { href: '/painel/funcionarios', label: 'Funcionários' },
   { href: '/painel/configuracoes', label: 'Configurações' },
 ];
