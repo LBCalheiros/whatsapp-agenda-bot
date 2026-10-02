@@ -13,6 +13,7 @@ const ITENS_NAV = [
   { href: '/painel/disponibilidade', label: 'Disponibilidade' },
   { href: '/painel/servicos', label: 'Serviços' },
   { href: '/painel/funcionarios', label: 'Funcionários' },
+  { href: '/painel/profissionais', label: 'Profissionais' },
   { href: '/painel/configuracoes', label: 'Configurações' },
 ];
 

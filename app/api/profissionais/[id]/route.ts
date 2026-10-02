@@ -3,58 +3,62 @@ import { logger } from '@/infra/logger';
 import { obterSessaoAtual } from '@/infra/autenticacaoMiddleware';
 import { validar } from '@/infra/validacao';
 import {
-  criarProfissional,
-  listarProfissionaisAtivos,
-  listarTodosProfissionais,
+  atualizarProfissional,
+  buscarProfissionalPorId,
+  definirAtivoProfissional,
 } from '@/models/profissional';
 import { z } from 'zod';
 
-const schemaCriarProfissional = z.object({
-  nome: z.string().min(1, 'Nome é obrigatório'),
+const schemaPatchProfissional = z.object({
+  nome: z.string().min(1).optional(),
   telefoneContato: z.string().nullable().optional(),
+  ativo: z.boolean().optional(),
 });
 
-export async function GET(request: Request) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const sessao = await obterSessaoAtual();
   if (!sessao) {
     return Response.json({ error: 'Não autenticado' }, { status: 401 });
   }
 
   try {
-    const { searchParams } = new URL(request.url);
-    const incluirInativos = searchParams.get('incluirInativos') === 'true';
-
-    // comportamento padrão inalterado (só ativos) — quem consumia esse
-    // endpoint antes (dropdown de funcionários) continua recebendo o mesmo
-    const profissionais = incluirInativos
-      ? await listarTodosProfissionais()
-      : await listarProfissionaisAtivos();
-    return Response.json(profissionais);
+    const { id } = await params;
+    const profissional = await buscarProfissionalPorId(Number(id));
+    return Response.json(profissional);
   } catch (error) {
+    if (error instanceof AppError) {
+      return Response.json({ error: error.message }, { status: error.statusCode });
+    }
     logger.error({ error }, 'Erro inesperado');
     return Response.json({ error: 'Erro interno' }, { status: 500 });
   }
 }
 
-export async function POST(request: Request) {
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const sessao = await obterSessaoAtual();
   if (!sessao) {
     return Response.json({ error: 'Não autenticado' }, { status: 401 });
   }
   if (sessao.role !== 'gerente') {
-    return Response.json({ error: 'Só gerentes podem criar profissionais' }, { status: 403 });
+    return Response.json({ error: 'Só gerentes podem editar profissionais' }, { status: 403 });
   }
 
   try {
+    const { id } = await params;
+    const idNumero = Number(id);
     const body = await request.json();
-    const dados = validar(schemaCriarProfissional, body);
+    const dados = validar(schemaPatchProfissional, body);
 
-    const profissional = await criarProfissional({
+    let profissional = await atualizarProfissional(idNumero, {
       nome: dados.nome,
       telefoneContato: dados.telefoneContato,
     });
 
-    return Response.json(profissional, { status: 201 });
+    if (dados.ativo !== undefined) {
+      profissional = await definirAtivoProfissional(idNumero, dados.ativo);
+    }
+
+    return Response.json(profissional);
   } catch (error) {
     if (error instanceof AppError) {
       return Response.json({ error: error.message }, { status: error.statusCode });
