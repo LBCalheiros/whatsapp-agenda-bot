@@ -23,6 +23,10 @@ type Bloqueio = {
   motivo: string | null;
 };
 
+type Configuracoes = {
+  antecedenciaMinimaHoras: number;
+};
+
 const NOMES_DIAS = [
   'Domingo',
   'Segunda-feira',
@@ -148,8 +152,10 @@ function LinhaDia({
   }
 
   return (
-    <div className="flex items-center justify-between border-b border-gray-100 py-2 last:border-0 dark:border-gray-800">
-      <span className="w-32 text-sm text-gray-900 dark:text-gray-100">{NOMES_DIAS[diaSemana]}</span>
+    <div className="flex flex-wrap items-center justify-between gap-y-1 border-b border-gray-100 py-2 last:border-0 dark:border-gray-800">
+      <span className="w-full text-sm text-gray-900 sm:w-32 dark:text-gray-100">
+        {NOMES_DIAS[diaSemana]}
+      </span>
       {regra ? (
         <span className="flex-1 text-sm text-gray-600 dark:text-gray-400">
           {regra.horario_inicio.slice(0, 5)} às {regra.horario_fim.slice(0, 5)} ·{' '}
@@ -158,7 +164,7 @@ function LinhaDia({
       ) : (
         <span className="flex-1 text-sm text-gray-400 dark:text-gray-500">Fechado</span>
       )}
-      <div className="flex gap-3">
+      <div className="flex shrink-0 gap-3">
         <button
           onClick={() => setEditando(true)}
           className="text-xs text-gray-500 hover:underline dark:text-gray-400"
@@ -176,6 +182,73 @@ function LinhaDia({
         )}
       </div>
     </div>
+  );
+}
+
+function SecaoAntecedenciaMinima({ refreshKey }: { refreshKey: number }) {
+  const configEstado = useApiPolling<Configuracoes>(
+    `/api/disponibilidade/configuracoes?_r=${refreshKey}`,
+    INTERVALO_POLLING_MS,
+  );
+  const [horas, setHoras] = useState<number | null>(null);
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [salvo, setSalvo] = useState(false);
+
+  const valorAtual =
+    horas ?? (configEstado.status === 'sucesso' ? configEstado.dados.antecedenciaMinimaHoras : 2);
+
+  async function salvar(evento: FormEvent) {
+    evento.preventDefault();
+    setErro(null);
+    setSalvo(false);
+    setSalvando(true);
+    try {
+      await apiFetch('/api/disponibilidade/configuracoes', {
+        method: 'PUT',
+        body: JSON.stringify({ antecedenciaMinimaHoras: valorAtual }),
+      });
+      setSalvo(true);
+    } catch (error) {
+      setErro(error instanceof ApiError ? error.message : 'Erro inesperado');
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  if (configEstado.status === 'carregando') {
+    return <LoadingState texto="Carregando..." />;
+  }
+  if (configEstado.status === 'erro') {
+    return <ErrorState mensagem={configEstado.mensagem} />;
+  }
+
+  return (
+    <form onSubmit={salvar} className="flex flex-wrap items-center gap-2">
+      <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+        Exigir pelo menos
+        <input
+          type="number"
+          min={0}
+          value={valorAtual}
+          onChange={(e) => {
+            setHoras(Number(e.target.value));
+            setSalvo(false);
+          }}
+          className="w-20 rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+        />
+        horas de antecedência pra agendar ou reagendar
+      </label>
+      <Button type="submit" disabled={salvando}>
+        Salvar
+      </Button>
+      {salvo && <span className="text-xs text-gray-400 dark:text-gray-500">Salvo.</span>}
+      {erro && <ErrorState mensagem={erro} />}
+      <p className="mt-1 w-full text-xs text-gray-400 dark:text-gray-500">
+        Vale pro fluxo do cliente pelo WhatsApp. Reagendamentos feitos por você no painel de agenda
+        não respeitam esse limite — você decide livremente qualquer horário.
+      </p>
+    </form>
   );
 }
 
@@ -275,6 +348,13 @@ export default function DisponibilidadePage() {
             ))}
           </div>
         )}
+      </Card>
+
+      <Card>
+        <h2 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
+          Antecedência mínima
+        </h2>
+        <SecaoAntecedenciaMinima refreshKey={refreshKey} />
       </Card>
 
       <Card>

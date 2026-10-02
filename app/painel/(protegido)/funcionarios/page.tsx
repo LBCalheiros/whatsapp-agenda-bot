@@ -380,8 +380,8 @@ export default function FuncionariosPage() {
       {listaEstado.status === 'erro' && <ErrorState mensagem={listaEstado.mensagem} />}
 
       {listaEstado.status === 'sucesso' && (
-        <div className="flex gap-6">
-          <div className="w-64 shrink-0">
+        <div className="flex flex-col gap-6 md:flex-row">
+          <div className="w-full shrink-0 md:w-64">
             <ul className="flex flex-col gap-1">
               {lista.map((funcionario) => (
                 <li key={funcionario.id}>

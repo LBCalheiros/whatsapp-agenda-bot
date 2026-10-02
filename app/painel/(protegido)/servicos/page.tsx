@@ -27,13 +27,7 @@ function formatarPreco(preco: string | null): string {
   return Number(preco).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-function FormularioServico({
-  servico,
-  onSalvo,
-}: {
-  servico: Servico;
-  onSalvo: () => void;
-}) {
+function FormularioServico({ servico, onSalvo }: { servico: Servico; onSalvo: () => void }) {
   const [nome, setNome] = useState(servico.nome);
   const [duracaoMinutos, setDuracaoMinutos] = useState(servico.duracao_minutos);
   const [preco, setPreco] = useState(servico.preco ?? '');
@@ -264,8 +258,8 @@ export default function ServicosPage() {
       {listaEstado.status === 'erro' && <ErrorState mensagem={listaEstado.mensagem} />}
 
       {listaEstado.status === 'sucesso' && (
-        <div className="flex gap-6">
-          <div className="w-64 shrink-0">
+        <div className="flex flex-col gap-6 md:flex-row">
+          <div className="w-full shrink-0 md:w-64">
             <ul className="flex flex-col gap-1">
               {lista.map((servico) => (
                 <li key={servico.id}>
