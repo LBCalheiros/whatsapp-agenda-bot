@@ -147,6 +147,53 @@ export async function listarAgendamentos(filtros: {
   return rows;
 }
 
+// Soma o valor dos agendamentos CONCLUÍDOS (status = 'completo') num período —
+// cancelados nunca entram aqui, é por isso que a condição não precisa nem
+// mencionar 'cancelado': só interessa o que efetivamente aconteceu e gerou
+// receita. Serviços sem preço definido (preco IS NULL) contam na quantidade
+// mas somam R$0 — sinalizado em `semPreco` pra a tela não esconder isso.
+export async function calcularReceita(filtros: { dataInicio?: Date; dataFim?: Date }) {
+  const condicoes = [`a.status = 'completo'`];
+  const valores: unknown[] = [];
+
+  if (filtros.dataInicio && filtros.dataFim) {
+    const inicioDia = inicioDoDiaBRT(filtros.dataInicio);
+    const fimDia = fimDoDiaBRT(filtros.dataFim);
+    valores.push(inicioDia, fimDia);
+    condicoes.push(`a.data_hora BETWEEN $${valores.length - 1} AND $${valores.length}`);
+  }
+
+  const { rows } = await pool.query(
+    `SELECT
+       s.id AS servico_id,
+       s.nome AS servico_nome,
+       COUNT(*)::int AS quantidade,
+       COALESCE(SUM(s.preco), 0) AS total,
+       COUNT(*) FILTER (WHERE s.preco IS NULL)::int AS sem_preco
+     FROM agendamentos a
+     JOIN servicos s ON s.id = a.servico_id
+     WHERE ${condicoes.join(' AND ')}
+     GROUP BY s.id, s.nome
+     ORDER BY total DESC`,
+    valores,
+  );
+
+  const totalGeral = rows.reduce((soma, r) => soma + Number(r.total), 0);
+  const quantidadeSemPreco = rows.reduce((soma, r) => soma + r.sem_preco, 0);
+
+  return {
+    totalGeral,
+    quantidadeSemPreco,
+    porServico: rows.map((r) => ({
+      servicoId: r.servico_id,
+      servicoNome: r.servico_nome,
+      quantidade: r.quantidade,
+      total: Number(r.total),
+      quantidadeSemPreco: r.sem_preco,
+    })),
+  };
+}
+
 export async function buscarPorId(agendamentoId: number): Promise<Agendamento> {
   const { rows } = await pool.query(`SELECT * FROM agendamentos WHERE id = $1`, [agendamentoId]);
   if (rows.length === 0) {
@@ -219,11 +266,6 @@ export async function reagendarAgendamento(agendamentoId: number, novaDataHora: 
   );
 }
 
-// Usada só pelo painel (admin), diferente de reagendarAgendamento (usada pelo bot):
-// sem checagem de antecedência mínima nem de disponibilidade, o admin decide
-// livremente qualquer data/hora. A única proteção que resta é a constraint única
-// do banco (profissional_id + data_hora), que barra apenas timestamp idêntico,
-// não sobreposição por duração.
 export async function reagendarComoAdmin(agendamentoId: number, novaDataHora: Date) {
   const agendamento = await buscarPorId(agendamentoId);
 

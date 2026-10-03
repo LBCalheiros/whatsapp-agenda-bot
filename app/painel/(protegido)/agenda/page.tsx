@@ -11,8 +11,9 @@ import { ErrorState } from '@/components/ui/ErrorState';
 
 type StatusAgendamento = 'agendado' | 'confirmado' | 'cancelado' | 'completo' | 'nao_compareceu';
 
-type Aba = 'proximos' | 'historico';
+type Aba = 'proximos' | 'historico' | 'receita';
 type Periodo = 'todos' | 'hoje' | 'semana' | 'mes';
+type PeriodoReceita = 'mes' | 'hoje' | 'tudo' | 'personalizado';
 
 type Agendamento = {
   id: number;
@@ -30,6 +31,24 @@ type Agendamento = {
 type Servico = {
   id: number;
   nome: string;
+};
+
+type EuMesmo = {
+  id: number;
+  email: string;
+  role: 'gerente' | 'funcionario';
+};
+
+type Receita = {
+  totalGeral: number;
+  quantidadeSemPreco: number;
+  porServico: {
+    servicoId: number;
+    servicoNome: string;
+    quantidade: number;
+    total: number;
+    quantidadeSemPreco: number;
+  }[];
 };
 
 const ROTULOS_STATUS: Record<StatusAgendamento, string> = {
@@ -52,8 +71,11 @@ function formatarDataHora(iso: string): string {
   });
 }
 
+function formatarMoeda(valor: number): string {
+  return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
 function paraInputDatetimeLocal(iso: string): string {
-  // datetime-local não entende timezone; formata em BRT manualmente
   const partes = new Intl.DateTimeFormat('sv-SE', {
     timeZone: 'America/Sao_Paulo',
     year: 'numeric',
@@ -71,6 +93,133 @@ function paraDataYYYYMMDD(data: Date): string {
 
 function linkWhatsapp(telefone: string): string {
   return `https://wa.me/${telefone.replace(/\D/g, '')}`;
+}
+
+function SecaoReceita() {
+  const [periodo, setPeriodo] = useState<PeriodoReceita>('mes');
+  const hoje = new Date();
+  const [dataInicioCustom, setDataInicioCustom] = useState(paraDataYYYYMMDD(hoje));
+  const [dataFimCustom, setDataFimCustom] = useState(paraDataYYYYMMDD(hoje));
+
+  const { dataInicio, dataFim } = useMemo(() => {
+    if (periodo === 'tudo') return { dataInicio: '', dataFim: '' };
+    if (periodo === 'personalizado') return { dataInicio: dataInicioCustom, dataFim: dataFimCustom };
+    if (periodo === 'hoje') {
+      const hojeStr = paraDataYYYYMMDD(new Date());
+      return { dataInicio: hojeStr, dataFim: hojeStr };
+    }
+    // mes: do dia 1 até hoje
+    const agora = new Date();
+    const inicioMes = new Date(agora.getFullYear(), agora.getMonth(), 1);
+    return { dataInicio: paraDataYYYYMMDD(inicioMes), dataFim: paraDataYYYYMMDD(agora) };
+  }, [periodo, dataInicioCustom, dataFimCustom]);
+
+  const caminho = useMemo(() => {
+    const params = new URLSearchParams();
+    if (dataInicio && dataFim) {
+      params.set('dataInicio', dataInicio);
+      params.set('dataFim', dataFim);
+    }
+    return `/api/agendamentos/receita?${params.toString()}`;
+  }, [dataInicio, dataFim]);
+
+  const receitaEstado = useApiPolling<Receita>(caminho, 30000);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={periodo}
+          onChange={(e) => setPeriodo(e.target.value as PeriodoReceita)}
+          className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+        >
+          <option value="mes">Este mês</option>
+          <option value="hoje">Hoje</option>
+          <option value="tudo">Desde sempre</option>
+          <option value="personalizado">Personalizado</option>
+        </select>
+        {periodo === 'personalizado' && (
+          <>
+            <input
+              type="date"
+              value={dataInicioCustom}
+              onChange={(e) => setDataInicioCustom(e.target.value)}
+              className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+            />
+            <span className="text-sm text-gray-400">até</span>
+            <input
+              type="date"
+              value={dataFimCustom}
+              onChange={(e) => setDataFimCustom(e.target.value)}
+              className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+            />
+          </>
+        )}
+      </div>
+
+      {receitaEstado.status === 'carregando' && <LoadingState texto="Carregando..." />}
+      {receitaEstado.status === 'erro' && <ErrorState mensagem={receitaEstado.mensagem} />}
+
+      {receitaEstado.status === 'sucesso' && (
+        <>
+          <Card>
+            <p className="text-xs font-semibold tracking-wide text-gray-500 uppercase dark:text-gray-400">
+              Total no período
+            </p>
+            <p className="mt-1 text-3xl font-semibold text-gray-900 dark:text-gray-100">
+              {formatarMoeda(receitaEstado.dados.totalGeral)}
+            </p>
+            {receitaEstado.dados.quantidadeSemPreco > 0 && (
+              <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
+                {receitaEstado.dados.quantidadeSemPreco} agendamento(s) concluído(s) usam serviço
+                sem preço definido — contam na quantidade abaixo mas somam R$ 0,00. Defina o preço
+                em{' '}
+                <a href="/painel/servicos" className="underline">
+                  Serviços
+                </a>{' '}
+                se isso não estiver certo.
+              </p>
+            )}
+          </Card>
+
+          <Card>
+            <h2 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
+              Por serviço
+            </h2>
+            {receitaEstado.dados.porServico.length === 0 ? (
+              <p className="text-xs text-gray-400 dark:text-gray-500">
+                Nenhum agendamento concluído nesse período.
+              </p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 text-left text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                    <th className="pb-2 font-medium">Serviço</th>
+                    <th className="pb-2 font-medium">Qtd.</th>
+                    <th className="pb-2 text-right font-medium">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {receitaEstado.dados.porServico.map((linha) => (
+                    <tr
+                      key={linha.servicoId}
+                      className="border-b border-gray-100 last:border-0 dark:border-gray-800"
+                    >
+                      <td className="py-2 text-gray-900 dark:text-gray-100">{linha.servicoNome}</td>
+                      <td className="py-2 text-gray-600 dark:text-gray-400">{linha.quantidade}</td>
+                      <td className="py-2 text-right text-gray-900 dark:text-gray-100">
+                        {formatarMoeda(linha.total)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Card>
+        </>
+      )}
+    </div>
+  );
 }
 
 export default function AgendaPage() {
@@ -94,13 +243,16 @@ export default function AgendaPage() {
   const [salvando, setSalvando] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  const euEstado = useApiPolling<EuMesmo>('/api/auth/me', 60000);
+  const souGerente = euEstado.status === 'sucesso' && euEstado.dados.role === 'gerente';
+
   const servicosEstado = useApiPolling<Servico[]>('/api/servicos', 60000);
   const servicos = servicosEstado.status === 'sucesso' ? servicosEstado.dados : [];
 
-  // "hoje" cobre só o dia de hoje; "semana"/"mes" vão de hoje até +7/+30 dias.
-  // Só se aplica na aba "Próximos" — "Histórico" tem período fixo de 30 dias.
   const { dataInicio, dataFim } = useMemo(() => {
-    if (aba === 'historico' || periodo === 'todos') return { dataInicio: '', dataFim: '' };
+    if (aba === 'historico' || aba === 'receita' || periodo === 'todos') {
+      return { dataInicio: '', dataFim: '' };
+    }
     const hoje = new Date();
     const dias = periodo === 'hoje' ? 0 : periodo === 'semana' ? 7 : 30;
     const fim = new Date(hoje.getTime() + dias * 24 * 60 * 60 * 1000);
@@ -125,7 +277,10 @@ export default function AgendaPage() {
     return `/api/agendamentos?${params.toString()}`;
   }, [aba, dataInicio, dataFim, filtroServicoId, filtroCliente, filtroStatusHistorico, refreshKey]);
 
-  const listaEstado = useApiPolling<Agendamento[]>(caminhoLista, INTERVALO_LISTA_MS);
+  const listaEstado = useApiPolling<Agendamento[]>(
+    aba !== 'receita' ? caminhoLista : null,
+    INTERVALO_LISTA_MS,
+  );
   const lista = listaEstado.status === 'sucesso' ? listaEstado.dados : [];
   const selecionado = lista.find((a) => a.id === selecionadoId) ?? null;
 
@@ -201,7 +356,6 @@ export default function AgendaPage() {
     setErroAcao(null);
     setSalvando(true);
     try {
-      // datetime-local não carrega timezone; assume-se sempre horário de Brasília (-03:00)
       await apiFetch(`/api/agendamentos/${selecionado.id}/reagendar`, {
         method: 'PATCH',
         body: JSON.stringify({ novaDataHora: `${novaDataHora}:00-03:00` }),
@@ -256,59 +410,77 @@ export default function AgendaPage() {
           >
             Histórico
           </button>
+          {souGerente && (
+            <button
+              onClick={() => trocarAba('receita')}
+              className={`flex-1 rounded px-2 py-1.5 text-sm font-medium transition-colors ${
+                aba === 'receita'
+                  ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+                  : 'text-gray-500 dark:text-gray-400'
+              }`}
+            >
+              Receita
+            </button>
+          )}
         </div>
 
-        <div className="mb-4 flex flex-col gap-2">
-          {aba === 'proximos' && (
+        {aba !== 'receita' && (
+          <div className="mb-4 flex flex-col gap-2">
+            {aba === 'proximos' && (
+              <select
+                value={periodo}
+                onChange={(e) => setPeriodo(e.target.value as Periodo)}
+                className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+              >
+                <option value="todos">Todos os períodos</option>
+                <option value="hoje">Hoje</option>
+                <option value="semana">Próximos 7 dias</option>
+                <option value="mes">Próximo mês</option>
+              </select>
+            )}
+            {aba === 'historico' && (
+              <select
+                value={filtroStatusHistorico}
+                onChange={(e) =>
+                  setFiltroStatusHistorico(e.target.value as typeof filtroStatusHistorico)
+                }
+                className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+              >
+                <option value="">Cancelados e concluídos</option>
+                <option value="cancelado">Só cancelados</option>
+                <option value="completo">Só concluídos</option>
+              </select>
+            )}
             <select
-              value={periodo}
-              onChange={(e) => setPeriodo(e.target.value as Periodo)}
+              value={filtroServicoId}
+              onChange={(e) => setFiltroServicoId(e.target.value)}
               className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
             >
-              <option value="todos">Todos os períodos</option>
-              <option value="hoje">Hoje</option>
-              <option value="semana">Próximos 7 dias</option>
-              <option value="mes">Próximo mês</option>
+              <option value="">Todos os serviços</option>
+              {servicos.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.nome}
+                </option>
+              ))}
             </select>
-          )}
-          {aba === 'historico' && (
-            <select
-              value={filtroStatusHistorico}
-              onChange={(e) =>
-                setFiltroStatusHistorico(e.target.value as typeof filtroStatusHistorico)
-              }
+            <input
+              type="text"
+              value={filtroCliente}
+              onChange={(e) => setFiltroCliente(e.target.value)}
+              placeholder="Buscar por nome ou telefone..."
               className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-            >
-              <option value="">Cancelados e concluídos</option>
-              <option value="cancelado">Só cancelados</option>
-              <option value="completo">Só concluídos</option>
-            </select>
-          )}
-          <select
-            value={filtroServicoId}
-            onChange={(e) => setFiltroServicoId(e.target.value)}
-            className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-          >
-            <option value="">Todos os serviços</option>
-            {servicos.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.nome}
-              </option>
-            ))}
-          </select>
-          <input
-            type="text"
-            value={filtroCliente}
-            onChange={(e) => setFiltroCliente(e.target.value)}
-            placeholder="Buscar por nome ou telefone..."
-            className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-          />
-        </div>
+            />
+          </div>
+        )}
 
-        {listaEstado.status === 'carregando' && <LoadingState texto="Carregando..." />}
-        {listaEstado.status === 'erro' && <ErrorState mensagem={listaEstado.mensagem} />}
+        {aba !== 'receita' && listaEstado.status === 'carregando' && (
+          <LoadingState texto="Carregando..." />
+        )}
+        {aba !== 'receita' && listaEstado.status === 'erro' && (
+          <ErrorState mensagem={listaEstado.mensagem} />
+        )}
 
-        {listaEstado.status === 'sucesso' && (
+        {aba !== 'receita' && listaEstado.status === 'sucesso' && (
           <ul className="flex flex-col gap-1">
             {lista.length === 0 && (
               <p className="text-xs text-gray-400 dark:text-gray-500">
@@ -340,7 +512,9 @@ export default function AgendaPage() {
       </div>
 
       <div className="flex-1">
-        {!selecionado && (
+        {aba === 'receita' && <SecaoReceita />}
+
+        {aba !== 'receita' && !selecionado && (
           <Card className="flex md:h-full items-center justify-center">
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Selecione um agendamento à esquerda.
@@ -348,7 +522,7 @@ export default function AgendaPage() {
           </Card>
         )}
 
-        {selecionado && (
+        {aba !== 'receita' && selecionado && (
           <Card className="flex md:h-full flex-col gap-4 overflow-y-auto">
             <div className="border-b border-gray-200 pb-3 dark:border-gray-700">
               {editandoNome ? (
@@ -465,8 +639,8 @@ export default function AgendaPage() {
                   {selecionado.observacoes || 'Nenhuma observação registrada.'}
                 </p>
                 <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
-                  Agendamentos do histórico não podem ser reagendados ou ter observações editadas —
-                  use a aba &quot;Próximos&quot; pra agendamentos futuros.
+                  Agendamentos do histórico não podem ser reagendados ou ter observações editadas
+                  — use a aba &quot;Próximos&quot; pra agendamentos futuros.
                 </p>
               </div>
             )}
