@@ -14,7 +14,14 @@ export async function DELETE(
 
   try {
     const { diaSemana } = await params;
-    const profissionalId = await obterProfissionalPadrao();
+    const { searchParams } = new URL(request.url);
+    const profissionalIdParam = searchParams.get('profissionalId');
+
+    const profissionalId =
+      sessao.role === 'gerente' && profissionalIdParam
+        ? Number(profissionalIdParam)
+        : await obterProfissionalPadrao();
+
     await removerRegraDisponibilidade(profissionalId, Number(diaSemana));
     return Response.json({ ok: true });
   } catch (error) {

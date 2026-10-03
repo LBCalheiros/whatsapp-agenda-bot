@@ -12,6 +12,7 @@ import { z } from 'zod';
 const schemaCriarProfissional = z.object({
   nome: z.string().min(1, 'Nome é obrigatório'),
   telefoneContato: z.string().nullable().optional(),
+  servicoIds: z.array(z.number().int().positive()).optional(),
 });
 
 export async function GET(request: Request) {
@@ -24,8 +25,6 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const incluirInativos = searchParams.get('incluirInativos') === 'true';
 
-    // comportamento padrão inalterado (só ativos) — quem consumia esse
-    // endpoint antes (dropdown de funcionários) continua recebendo o mesmo
     const profissionais = incluirInativos
       ? await listarTodosProfissionais()
       : await listarProfissionaisAtivos();
@@ -52,6 +51,7 @@ export async function POST(request: Request) {
     const profissional = await criarProfissional({
       nome: dados.nome,
       telefoneContato: dados.telefoneContato,
+      servicoIds: dados.servicoIds,
     });
 
     return Response.json(profissional, { status: 201 });

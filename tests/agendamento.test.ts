@@ -24,6 +24,11 @@ describe('models/agendamento (integração)', () => {
     );
     servicoId = servico.rows[0].id;
 
+    await pool.query(
+      `INSERT INTO profissional_servicos (profissional_id, servico_id) VALUES ($1, $2)`,
+      [profissionalId, servicoId],
+    );
+
     const cliente = await pool.query(
       `INSERT INTO clientes (telefone, nome) VALUES ('5511900000001', 'Cliente Jest') RETURNING id`,
     );
@@ -38,6 +43,10 @@ describe('models/agendamento (integração)', () => {
   });
 
   afterAll(async () => {
+    await pool.query(`DELETE FROM profissional_servicos WHERE profissional_id = $1`, [
+      profissionalId,
+    ]);
+
     await pool.query(
       `DELETE FROM historico_agendamentos WHERE agendamento_id IN (SELECT id FROM agendamentos WHERE profissional_id = $1)`,
       [profissionalId],

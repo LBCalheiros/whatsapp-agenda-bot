@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useEffect, useState, FormEvent } from 'react';
 import { useApiPolling } from '@/hooks/useApiPolling';
 import { apiFetch, ApiError } from '@/lib/apiClient';
 import { Button } from '@/components/ui/Button';
@@ -24,7 +24,19 @@ type Bloqueio = {
 };
 
 type Configuracoes = {
+  profissionalId: number;
   antecedenciaMinimaHoras: number;
+};
+
+type EuMesmo = {
+  id: number;
+  email: string;
+  role: 'gerente' | 'funcionario';
+};
+
+type Profissional = {
+  id: number;
+  nome: string;
 };
 
 const NOMES_DIAS = [
@@ -185,15 +197,29 @@ function LinhaDia({
   );
 }
 
-function SecaoAntecedenciaMinima({ refreshKey }: { refreshKey: number }) {
+function SecaoAntecedenciaMinima({
+  profissionalId,
+  refreshKey,
+}: {
+  profissionalId: number | null;
+  refreshKey: number;
+}) {
+  const query = profissionalId ? `&profissionalId=${profissionalId}` : '';
   const configEstado = useApiPolling<Configuracoes>(
-    `/api/disponibilidade/configuracoes?_r=${refreshKey}`,
+    `/api/disponibilidade/configuracoes?_r=${refreshKey}${query}`,
     INTERVALO_POLLING_MS,
   );
   const [horas, setHoras] = useState<number | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [salvo, setSalvo] = useState(false);
+
+  // zera o rascunho sempre que trocar de profissional, senão o valor do
+  // anterior fica preso na tela até o usuário mexer de novo
+  useEffect(() => {
+    setHoras(null);
+    setSalvo(false);
+  }, [profissionalId]);
 
   const valorAtual =
     horas ?? (configEstado.status === 'sucesso' ? configEstado.dados.antecedenciaMinimaHoras : 2);
@@ -206,7 +232,10 @@ function SecaoAntecedenciaMinima({ refreshKey }: { refreshKey: number }) {
     try {
       await apiFetch('/api/disponibilidade/configuracoes', {
         method: 'PUT',
-        body: JSON.stringify({ antecedenciaMinimaHoras: valorAtual }),
+        body: JSON.stringify({
+          antecedenciaMinimaHoras: valorAtual,
+          ...(profissionalId ? { profissionalId } : {}),
+        }),
       });
       setSalvo(true);
     } catch (error) {
@@ -245,8 +274,8 @@ function SecaoAntecedenciaMinima({ refreshKey }: { refreshKey: number }) {
       {salvo && <span className="text-xs text-gray-400 dark:text-gray-500">Salvo.</span>}
       {erro && <ErrorState mensagem={erro} />}
       <p className="mt-1 w-full text-xs text-gray-400 dark:text-gray-500">
-        Vale pro fluxo do cliente pelo WhatsApp. Reagendamentos feitos por você no painel de agenda
-        não respeitam esse limite — você decide livremente qualquer horário.
+        Vale pro fluxo do cliente pelo WhatsApp. Reagendamentos feitos por você no painel de
+        agenda não respeitam esse limite — você decide livremente qualquer horário.
       </p>
     </form>
   );
@@ -257,18 +286,32 @@ export default function DisponibilidadePage() {
   const [erroBloqueio, setErroBloqueio] = useState<string | null>(null);
   const [salvandoBloqueio, setSalvandoBloqueio] = useState(false);
 
+  // null = "usa o padrão" (comportamento de sempre); só gerente consegue
+  // trocar isso pra editar a disponibilidade de outro profissional
+  const [profissionalSelecionadoId, setProfissionalSelecionadoId] = useState<number | null>(null);
+
   const agora = new Date();
   const daquiUmaHora = new Date(agora.getTime() + 60 * 60 * 1000);
   const [inicioBloqueio, setInicioBloqueio] = useState(paraInputDatetimeLocal(agora));
   const [fimBloqueio, setFimBloqueio] = useState(paraInputDatetimeLocal(daquiUmaHora));
   const [motivoBloqueio, setMotivoBloqueio] = useState('');
 
+  const euEstado = useApiPolling<EuMesmo>('/api/auth/me', 60000);
+  const souGerente = euEstado.status === 'sucesso' && euEstado.dados.role === 'gerente';
+
+  const profissionaisEstado = useApiPolling<Profissional[]>(
+    souGerente ? '/api/profissionais' : null,
+    60000,
+  );
+
+  const query = profissionalSelecionadoId ? `&profissionalId=${profissionalSelecionadoId}` : '';
+
   const regrasEstado = useApiPolling<Regra[]>(
-    `/api/disponibilidade/regras?_r=${refreshKey}`,
+    `/api/disponibilidade/regras?_r=${refreshKey}${query}`,
     INTERVALO_POLLING_MS,
   );
   const bloqueiosEstado = useApiPolling<Bloqueio[]>(
-    `/api/disponibilidade/bloqueios?_r=${refreshKey}`,
+    `/api/disponibilidade/bloqueios?_r=${refreshKey}${query}`,
     INTERVALO_POLLING_MS,
   );
 
@@ -284,13 +327,16 @@ export default function DisponibilidadePage() {
   }) {
     await apiFetch('/api/disponibilidade/regras', {
       method: 'PUT',
-      body: JSON.stringify(dados),
+      body: JSON.stringify({
+        ...dados,
+        ...(profissionalSelecionadoId ? { profissionalId: profissionalSelecionadoId } : {}),
+      }),
     });
     forcarAtualizacao();
   }
 
   async function removerRegra(diaSemana: number) {
-    await apiFetch(`/api/disponibilidade/regras/${diaSemana}`, { method: 'DELETE' });
+    await apiFetch(`/api/disponibilidade/regras/${diaSemana}${query}`, { method: 'DELETE' });
     forcarAtualizacao();
   }
 
@@ -306,6 +352,7 @@ export default function DisponibilidadePage() {
           inicio: `${inicioBloqueio}:00-03:00`,
           fim: `${fimBloqueio}:00-03:00`,
           motivo: motivoBloqueio.trim() || undefined,
+          ...(profissionalSelecionadoId ? { profissionalId: profissionalSelecionadoId } : {}),
         }),
       });
       setMotivoBloqueio('');
@@ -327,6 +374,29 @@ export default function DisponibilidadePage() {
     <div className="flex max-w-3xl flex-col gap-6">
       <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">Disponibilidade</h1>
 
+      {souGerente && profissionaisEstado.status === 'sucesso' && (
+        <Card>
+          <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
+            Editando disponibilidade de
+            <select
+              value={profissionalSelecionadoId ?? ''}
+              onChange={(e) => {
+                setProfissionalSelecionadoId(e.target.value ? Number(e.target.value) : null);
+                forcarAtualizacao();
+              }}
+              className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+            >
+              <option value="">Profissional padrão</option>
+              {profissionaisEstado.dados.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.nome}
+                </option>
+              ))}
+            </select>
+          </label>
+        </Card>
+      )}
+
       <Card>
         <h2 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
           Dias de atendimento
@@ -339,7 +409,7 @@ export default function DisponibilidadePage() {
           <div>
             {Array.from({ length: 7 }, (_, diaSemana) => (
               <LinhaDia
-                key={diaSemana}
+                key={`${profissionalSelecionadoId ?? 'padrao'}-${diaSemana}`}
                 diaSemana={diaSemana}
                 regra={regrasEstado.dados.find((r) => r.dia_semana === diaSemana)}
                 onSalvar={salvarRegra}
@@ -354,7 +424,7 @@ export default function DisponibilidadePage() {
         <h2 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
           Antecedência mínima
         </h2>
-        <SecaoAntecedenciaMinima refreshKey={refreshKey} />
+        <SecaoAntecedenciaMinima profissionalId={profissionalSelecionadoId} refreshKey={refreshKey} />
       </Card>
 
       <Card>

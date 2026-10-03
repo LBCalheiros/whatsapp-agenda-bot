@@ -8,18 +8,28 @@ import { z } from 'zod';
 
 const schemaAntecedencia = z.object({
   antecedenciaMinimaHoras: z.number().int().min(0),
+  profissionalId: z.number().int().positive().optional(),
 });
 
-export async function GET() {
+export async function GET(request: Request) {
   const sessao = await obterSessaoAtual();
   if (!sessao) {
     return Response.json({ error: 'Não autenticado' }, { status: 401 });
   }
 
   try {
-    const profissionalId = await obterProfissionalPadrao();
+    const { searchParams } = new URL(request.url);
+    const profissionalIdParam = searchParams.get('profissionalId');
+
+    const profissionalId =
+      sessao.role === 'gerente' && profissionalIdParam
+        ? Number(profissionalIdParam)
+        : await obterProfissionalPadrao();
+
     const antecedenciaMinimaHoras = await buscarAntecedenciaMinima(profissionalId);
-    return Response.json({ antecedenciaMinimaHoras });
+    // devolve profissionalId sempre, pra tela saber qual está selecionado por
+    // padrão antes do gerente escolher outro explicitamente
+    return Response.json({ profissionalId, antecedenciaMinimaHoras });
   } catch (error) {
     if (error instanceof AppError) {
       return Response.json({ error: error.message }, { status: error.statusCode });
@@ -41,12 +51,12 @@ export async function PUT(request: Request) {
   try {
     const body = await request.json();
     const dados = validar(schemaAntecedencia, body);
-    const profissionalId = await obterProfissionalPadrao();
+    const profissionalId = dados.profissionalId ?? (await obterProfissionalPadrao());
     const antecedenciaMinimaHoras = await atualizarAntecedenciaMinima(
       profissionalId,
       dados.antecedenciaMinimaHoras,
     );
-    return Response.json({ antecedenciaMinimaHoras });
+    return Response.json({ profissionalId, antecedenciaMinimaHoras });
   } catch (error) {
     if (error instanceof AppError) {
       return Response.json({ error: error.message }, { status: error.statusCode });

@@ -9,16 +9,24 @@ const schemaCriarBloqueio = z.object({
   inicio: z.coerce.date(),
   fim: z.coerce.date(),
   motivo: z.string().optional(),
+  profissionalId: z.number().int().positive().optional(),
 });
 
-export async function GET() {
+export async function GET(request: Request) {
   const sessao = await obterSessaoAtual();
   if (!sessao) {
     return Response.json({ error: 'Não autenticado' }, { status: 401 });
   }
 
   try {
-    const profissionalId = await obterProfissionalPadrao();
+    const { searchParams } = new URL(request.url);
+    const profissionalIdParam = searchParams.get('profissionalId');
+
+    const profissionalId =
+      sessao.role === 'gerente' && profissionalIdParam
+        ? Number(profissionalIdParam)
+        : await obterProfissionalPadrao();
+
     const bloqueios = await listarBloqueios(profissionalId);
     return Response.json(bloqueios);
   } catch (error) {
@@ -39,7 +47,11 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const dados = validar(schemaCriarBloqueio, body);
-    const profissionalId = await obterProfissionalPadrao();
+
+    const profissionalId =
+      sessao.role === 'gerente' && dados.profissionalId
+        ? dados.profissionalId
+        : await obterProfissionalPadrao();
 
     const bloqueio = await criarBloqueio({
       profissionalId,

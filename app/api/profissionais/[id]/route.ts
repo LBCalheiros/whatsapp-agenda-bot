@@ -6,6 +6,7 @@ import {
   atualizarProfissional,
   buscarProfissionalPorId,
   definirAtivoProfissional,
+  listarServicoIdsDoProfissional,
 } from '@/models/profissional';
 import { z } from 'zod';
 
@@ -13,6 +14,7 @@ const schemaPatchProfissional = z.object({
   nome: z.string().min(1).optional(),
   telefoneContato: z.string().nullable().optional(),
   ativo: z.boolean().optional(),
+  servicoIds: z.array(z.number().int().positive()).optional(),
 });
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -23,8 +25,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   try {
     const { id } = await params;
-    const profissional = await buscarProfissionalPorId(Number(id));
-    return Response.json(profissional);
+    const idNumero = Number(id);
+    const profissional = await buscarProfissionalPorId(idNumero);
+    const servicoIds = await listarServicoIdsDoProfissional(idNumero);
+    return Response.json({ ...profissional, servicoIds });
   } catch (error) {
     if (error instanceof AppError) {
       return Response.json({ error: error.message }, { status: error.statusCode });
@@ -52,13 +56,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     let profissional = await atualizarProfissional(idNumero, {
       nome: dados.nome,
       telefoneContato: dados.telefoneContato,
+      servicoIds: dados.servicoIds,
     });
 
     if (dados.ativo !== undefined) {
       profissional = await definirAtivoProfissional(idNumero, dados.ativo);
     }
 
-    return Response.json(profissional);
+    const servicoIds = await listarServicoIdsDoProfissional(idNumero);
+    return Response.json({ ...profissional, servicoIds });
   } catch (error) {
     if (error instanceof AppError) {
       return Response.json({ error: error.message }, { status: error.statusCode });

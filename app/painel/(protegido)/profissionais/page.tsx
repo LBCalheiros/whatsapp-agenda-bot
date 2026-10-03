@@ -16,21 +16,74 @@ type Profissional = {
   antecedencia_minima_horas: number;
 };
 
+type ProfissionalComServicos = Profissional & { servicoIds: number[] };
+
+type Servico = {
+  id: number;
+  nome: string;
+};
+
 type EuMesmo = {
   id: number;
   email: string;
   role: 'gerente' | 'funcionario';
 };
 
+function ListaServicosCheckbox({
+  servicos,
+  selecionados,
+  onMudar,
+}: {
+  servicos: Servico[];
+  selecionados: number[];
+  onMudar: (servicoIds: number[]) => void;
+}) {
+  function alternar(servicoId: number) {
+    if (selecionados.includes(servicoId)) {
+      onMudar(selecionados.filter((id) => id !== servicoId));
+    } else {
+      onMudar([...selecionados, servicoId]);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-sm text-gray-700 dark:text-gray-300">Serviços que atende</span>
+      {servicos.length === 0 && (
+        <p className="text-xs text-gray-400 dark:text-gray-500">Nenhum serviço cadastrado ainda.</p>
+      )}
+      <div className="flex flex-col gap-1 rounded-md border border-gray-200 p-2 dark:border-gray-700">
+        {servicos.map((servico) => (
+          <label
+            key={servico.id}
+            className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"
+          >
+            <input
+              type="checkbox"
+              checked={selecionados.includes(servico.id)}
+              onChange={() => alternar(servico.id)}
+              className="h-4 w-4"
+            />
+            {servico.nome}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function FormularioProfissional({
   profissional,
+  servicos,
   onSalvo,
 }: {
-  profissional: Profissional;
+  profissional: ProfissionalComServicos;
+  servicos: Servico[];
   onSalvo: () => void;
 }) {
   const [nome, setNome] = useState(profissional.nome);
   const [telefoneContato, setTelefoneContato] = useState(profissional.telefone_contato ?? '');
+  const [servicoIds, setServicoIds] = useState<number[]>(profissional.servicoIds);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -44,6 +97,7 @@ function FormularioProfissional({
         body: JSON.stringify({
           nome,
           telefoneContato: telefoneContato.trim() || null,
+          servicoIds,
         }),
       });
       onSalvo();
@@ -98,6 +152,8 @@ function FormularioProfissional({
           />
         </label>
 
+        <ListaServicosCheckbox servicos={servicos} selecionados={servicoIds} onMudar={setServicoIds} />
+
         <p className="text-xs text-gray-400 dark:text-gray-500">
           Dias de atendimento, horários, bloqueios e antecedência mínima ficam em{' '}
           <a href="/painel/disponibilidade" className="underline">
@@ -133,9 +189,47 @@ function FormularioProfissional({
   );
 }
 
-function FormularioNovoProfissional({ onCriado }: { onCriado: () => void }) {
+function DetalheProfissional({
+  profissionalId,
+  servicos,
+  onSalvo,
+}: {
+  profissionalId: number;
+  servicos: Servico[];
+  onSalvo: () => void;
+}) {
+  const detalheEstado = useApiPolling<ProfissionalComServicos>(
+    `/api/profissionais/${profissionalId}`,
+    30000,
+  );
+
+  if (detalheEstado.status === 'carregando') {
+    return <LoadingState texto="Carregando..." />;
+  }
+  if (detalheEstado.status === 'erro') {
+    return <ErrorState mensagem={detalheEstado.mensagem} />;
+  }
+
+  return (
+    <FormularioProfissional
+      key={detalheEstado.dados.id}
+      profissional={detalheEstado.dados}
+      servicos={servicos}
+      onSalvo={onSalvo}
+    />
+  );
+}
+
+function FormularioNovoProfissional({
+  servicos,
+  onCriado,
+}: {
+  servicos: Servico[];
+  onCriado: () => void;
+}) {
   const [nome, setNome] = useState('');
   const [telefoneContato, setTelefoneContato] = useState('');
+  const [servicoIds, setServicoIds] = useState<number[]>([]);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -149,10 +243,12 @@ function FormularioNovoProfissional({ onCriado }: { onCriado: () => void }) {
         body: JSON.stringify({
           nome,
           telefoneContato: telefoneContato.trim() || null,
+          servicoIds,
         }),
       });
       setNome('');
       setTelefoneContato('');
+      setServicoIds([]);
       onCriado();
     } catch (error) {
       setErro(error instanceof ApiError ? error.message : 'Erro inesperado');
@@ -183,6 +279,8 @@ function FormularioNovoProfissional({ onCriado }: { onCriado: () => void }) {
           className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
         />
 
+        <ListaServicosCheckbox servicos={servicos} selecionados={servicoIds} onMudar={setServicoIds} />
+
         {erro && <ErrorState mensagem={erro} />}
 
         <Button type="submit" disabled={salvando} className="self-start">
@@ -203,6 +301,7 @@ export default function ProfissionaisPage() {
     `/api/profissionais?incluirInativos=true&_r=${refreshKey}`,
     30000,
   );
+  const servicosEstado = useApiPolling<Servico[]>('/api/servicos', 60000);
 
   function forcarAtualizacao() {
     setRefreshKey((k) => k + 1);
@@ -218,7 +317,7 @@ export default function ProfissionaisPage() {
 
   const souGerente = euEstado.dados.role === 'gerente';
   const lista = listaEstado.status === 'sucesso' ? listaEstado.dados : [];
-  const selecionado = lista.find((p) => p.id === selecionadoId) ?? null;
+  const servicos = servicosEstado.status === 'sucesso' ? servicosEstado.dados : [];
 
   return (
     <div className="flex max-w-4xl flex-col gap-6">
@@ -231,7 +330,9 @@ export default function ProfissionaisPage() {
         )}
       </div>
 
-      {mostrarFormNovo && <FormularioNovoProfissional onCriado={forcarAtualizacao} />}
+      {mostrarFormNovo && (
+        <FormularioNovoProfissional servicos={servicos} onCriado={forcarAtualizacao} />
+      )}
 
       {listaEstado.status === 'carregando' && <LoadingState texto="Carregando..." />}
       {listaEstado.status === 'erro' && <ErrorState mensagem={listaEstado.mensagem} />}
@@ -269,17 +370,17 @@ export default function ProfissionaisPage() {
 
           {souGerente && (
             <div className="flex-1">
-              {!selecionado && (
+              {!selecionadoId && (
                 <Card className="flex items-center justify-center py-12">
                   <p className="text-sm text-gray-500 dark:text-gray-400">
                     Selecione um profissional à esquerda.
                   </p>
                 </Card>
               )}
-              {selecionado && (
-                <FormularioProfissional
-                  key={selecionado.id}
-                  profissional={selecionado}
+              {selecionadoId && (
+                <DetalheProfissional
+                  profissionalId={selecionadoId}
+                  servicos={servicos}
                   onSalvo={forcarAtualizacao}
                 />
               )}

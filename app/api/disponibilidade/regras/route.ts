@@ -14,16 +14,26 @@ const schemaUpsertRegra = z.object({
   horarioInicio: z.string().regex(/^\d{2}:\d{2}$/, 'Use o formato HH:mm'),
   horarioFim: z.string().regex(/^\d{2}:\d{2}$/, 'Use o formato HH:mm'),
   intervaloMinutos: z.number().int().positive(),
+  profissionalId: z.number().int().positive().optional(),
 });
 
-export async function GET() {
+export async function GET(request: Request) {
   const sessao = await obterSessaoAtual();
   if (!sessao) {
     return Response.json({ error: 'Não autenticado' }, { status: 401 });
   }
 
   try {
-    const profissionalId = await obterProfissionalPadrao();
+    const { searchParams } = new URL(request.url);
+    const profissionalIdParam = searchParams.get('profissionalId');
+
+    // escolher outro profissional além do padrão é privilégio de gerente;
+    // se um funcionário mandar esse param, ele é simplesmente ignorado
+    const profissionalId =
+      sessao.role === 'gerente' && profissionalIdParam
+        ? Number(profissionalIdParam)
+        : await obterProfissionalPadrao();
+
     const regras = await listarRegras(profissionalId);
     return Response.json(regras);
   } catch (error) {
@@ -44,7 +54,11 @@ export async function PUT(request: Request) {
   try {
     const body = await request.json();
     const dados = validar(schemaUpsertRegra, body);
-    const profissionalId = await obterProfissionalPadrao();
+
+    const profissionalId =
+      sessao.role === 'gerente' && dados.profissionalId
+        ? dados.profissionalId
+        : await obterProfissionalPadrao();
 
     const regra = await upsertRegraDisponibilidade({
       profissionalId,

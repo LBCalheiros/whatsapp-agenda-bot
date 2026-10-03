@@ -2,7 +2,7 @@ import { pool } from '@/infra/database';
 import { AppError } from '@/infra/errors';
 import { fimDoDiaBRT, inicioDoDiaBRT } from '@/infra/data';
 import { validarHorarioDisponivel } from '@/models/disponibilidade';
-import { buscarAntecedenciaMinima } from '@/models/profissional';
+import { buscarAntecedenciaMinima, profissionalAtendeServico } from '@/models/profissional';
 
 type Agendamento = {
   id: number;
@@ -15,10 +15,6 @@ type Agendamento = {
   observacoes: string | null;
 };
 
-// Valor padrão da coluna profissionais.antecedencia_minima_horas — usado como
-// referência/fallback; a checagem de verdade em criarAgendamento/
-// reagendarAgendamento sempre lê o valor atual do profissional no banco,
-// configurável agora em /painel/disponibilidade.
 export const ANTECEDENCIA_MINIMA_HORAS = 2;
 const DIAS_HISTORICO = 30;
 
@@ -29,6 +25,11 @@ export async function criarAgendamento(input: {
   dataHora: Date;
 }) {
   const { clienteId, profissionalId, servicoId, dataHora } = input;
+
+  const atende = await profissionalAtendeServico(profissionalId, servicoId);
+  if (!atende) {
+    throw new AppError('Esse profissional não atende esse serviço');
+  }
 
   const antecedenciaMinimaHoras = await buscarAntecedenciaMinima(profissionalId);
   const horasAteAgendamento = (dataHora.getTime() - Date.now()) / (1000 * 60 * 60);

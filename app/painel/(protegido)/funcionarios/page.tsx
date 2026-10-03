@@ -29,6 +29,7 @@ type EuMesmo = {
 type Profissional = {
   id: number;
   nome: string;
+  telefone_contato: string | null;
 };
 
 const ROTULOS_PAPEL: Record<Papel, string> = {
@@ -60,6 +61,19 @@ function FormularioPerfil({
   );
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+
+  function selecionarProfissional(novoId: string) {
+    setProfissionalId(novoId);
+    // só sugere, nunca sobrescreve um telefone que a pessoa já preencheu —
+    // telefone de notificação e telefone de contato do profissional são
+    // campos independentes, isso é só um atalho de preenchimento
+    if (!telefoneNotificacao.trim()) {
+      const escolhido = profissionais.find((p) => String(p.id) === novoId);
+      if (escolhido?.telefone_contato) {
+        setTelefoneNotificacao(escolhido.telefone_contato);
+      }
+    }
+  }
 
   async function salvar(evento: FormEvent) {
     evento.preventDefault();
@@ -182,7 +196,7 @@ function FormularioPerfil({
               Profissional vinculado (agenda/disponibilidade)
               <select
                 value={profissionalId}
-                onChange={(e) => setProfissionalId(e.target.value)}
+                onChange={(e) => selecionarProfissional(e.target.value)}
                 className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
               >
                 <option value="">Nenhum</option>
@@ -238,10 +252,21 @@ function FormularioNovoFuncionario({
 }) {
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
+  const [telefoneNotificacao, setTelefoneNotificacao] = useState('');
   const [role, setRole] = useState<Papel>('funcionario');
   const [profissionalId, setProfissionalId] = useState('');
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+
+  function selecionarProfissional(novoId: string) {
+    setProfissionalId(novoId);
+    if (!telefoneNotificacao.trim()) {
+      const escolhido = profissionais.find((p) => String(p.id) === novoId);
+      if (escolhido?.telefone_contato) {
+        setTelefoneNotificacao(escolhido.telefone_contato);
+      }
+    }
+  }
 
   async function criar(evento: FormEvent) {
     evento.preventDefault();
@@ -253,12 +278,14 @@ function FormularioNovoFuncionario({
         body: JSON.stringify({
           email,
           senha,
+          telefoneNotificacao: telefoneNotificacao.trim() || null,
           role,
           profissionalId: profissionalId ? Number(profissionalId) : null,
         }),
       });
       setEmail('');
       setSenha('');
+      setTelefoneNotificacao('');
       setRole('funcionario');
       setProfissionalId('');
       onCriado();
@@ -292,6 +319,13 @@ function FormularioNovoFuncionario({
           required
           className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
         />
+        <input
+          type="text"
+          value={telefoneNotificacao}
+          onChange={(e) => setTelefoneNotificacao(e.target.value)}
+          placeholder="Telefone de notificação (opcional)"
+          className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+        />
         <select
           value={role}
           onChange={(e) => setRole(e.target.value as Papel)}
@@ -302,7 +336,7 @@ function FormularioNovoFuncionario({
         </select>
         <select
           value={profissionalId}
-          onChange={(e) => setProfissionalId(e.target.value)}
+          onChange={(e) => selecionarProfissional(e.target.value)}
           className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
         >
           <option value="">Sem profissional vinculado</option>
@@ -350,7 +384,6 @@ export default function FuncionariosPage() {
 
   const profissionais = profissionaisEstado.status === 'sucesso' ? profissionaisEstado.dados : [];
 
-  // Funcionário comum: só vê e edita o próprio perfil, sem lista nem ações sobre outros.
   if (!souGerente) {
     return (
       <div className="flex max-w-md flex-col gap-6">
