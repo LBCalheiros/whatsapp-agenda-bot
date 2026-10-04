@@ -1,7 +1,11 @@
 import { pool } from '@/infra/database';
 import { AppError } from '@/infra/errors';
 import { fimDoDiaBRT, inicioDoDiaBRT } from '@/infra/data';
-import { validarHorarioDisponivel } from '@/models/disponibilidade';
+import {
+  consultarHorariosDisponiveis,
+  obterProfissionalDisponivel,
+  validarHorarioDisponivel,
+} from '@/models/disponibilidade';
 import { buscarAntecedenciaMinima, profissionalAtendeServico } from '@/models/profissional';
 
 type Agendamento = {
@@ -147,11 +151,6 @@ export async function listarAgendamentos(filtros: {
   return rows;
 }
 
-// Soma o valor dos agendamentos CONCLUÍDOS (status = 'completo') num período —
-// cancelados nunca entram aqui, é por isso que a condição não precisa nem
-// mencionar 'cancelado': só interessa o que efetivamente aconteceu e gerou
-// receita. Serviços sem preço definido (preco IS NULL) contam na quantidade
-// mas somam R$0 — sinalizado em `semPreco` pra a tela não esconder isso.
 export async function calcularReceita(filtros: { dataInicio?: Date; dataFim?: Date }) {
   const condicoes = [`a.status = 'completo'`];
   const valores: unknown[] = [];
@@ -234,6 +233,45 @@ export async function cancelarComoCliente(agendamentoId: number) {
   return cancelarAgendamento(agendamentoId);
 }
 
+// Marca manualmente como concluído (botão no painel) ou chamada pelo cron
+// automático — as duas vias passam por aqui, pra garantir o mesmo registro
+// de histórico e as mesmas regras nos dois casos.
+export async function marcarComoCompleto(agendamentoId: number) {
+  const agendamento = await buscarPorId(agendamentoId);
+
+  if (agendamento.status === 'cancelado') {
+    throw new AppError('Não é possível marcar um agendamento cancelado como concluído');
+  }
+  if (agendamento.status === 'completo') {
+    return agendamento; // idempotente — já estava concluído, não é erro
+  }
+
+  await pool.query(`UPDATE agendamentos SET status = 'completo' WHERE id = $1`, [agendamentoId]);
+  await registrarHistorico(agendamentoId, agendamento.status, 'completo');
+
+  return { ...agendamento, status: 'completo' };
+}
+
+// Usada pelo cron: acha todo agendamento 'agendado'/'confirmado' cujo horário
+// de término (data_hora + duração do serviço) já passou, e marca como
+// 'completo' um por um (reaproveitando marcarComoCompleto, pelo histórico).
+// Retorna quantos foram concluídos nessa execução.
+export async function concluirAgendamentosPassados(): Promise<number> {
+  const { rows } = await pool.query(
+    `SELECT a.id
+     FROM agendamentos a
+     JOIN servicos s ON s.id = a.servico_id
+     WHERE a.status IN ('agendado', 'confirmado')
+       AND (a.data_hora + (s.duracao_minutos || ' minutes')::interval) < now()`,
+  );
+
+  for (const row of rows) {
+    await marcarComoCompleto(row.id);
+  }
+
+  return rows.length;
+}
+
 export async function reagendarAgendamento(agendamentoId: number, novaDataHora: Date) {
   const agendamento = await buscarPorId(agendamentoId);
 
@@ -251,11 +289,29 @@ export async function reagendarAgendamento(agendamentoId: number, novaDataHora: 
   );
   const duracaoMinutos = servicos[0].duracao_minutos;
 
-  await validarHorarioDisponivel(agendamento.profissional_id, novaDataHora, duracaoMinutos);
+  // tenta manter o mesmo profissional; só troca pra outro que atenda o mesmo
+  // serviço se o original não estiver livre nesse novo horário específico
+  let profissionalId = agendamento.profissional_id;
+  const horariosDoOriginal = await consultarHorariosDisponiveis(
+    profissionalId,
+    novaDataHora,
+    duracaoMinutos,
+  );
+  const originalContinuaLivre = horariosDoOriginal.some(
+    (d) => d.getTime() === novaDataHora.getTime(),
+  );
+
+  if (!originalContinuaLivre) {
+    profissionalId = await obterProfissionalDisponivel(
+      agendamento.servico_id,
+      novaDataHora,
+      duracaoMinutos,
+    );
+  }
 
   await pool.query(
-    `UPDATE agendamentos SET data_hora = $1, lembrete_enviado = false WHERE id = $2`,
-    [novaDataHora, agendamentoId],
+    `UPDATE agendamentos SET data_hora = $1, profissional_id = $2, lembrete_enviado = false WHERE id = $3`,
+    [novaDataHora, profissionalId, agendamentoId],
   );
 
   await registrarHistorico(

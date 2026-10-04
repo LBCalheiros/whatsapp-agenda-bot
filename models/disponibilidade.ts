@@ -23,7 +23,7 @@ function validarRegra(horarioInicio: string, horarioFim: string, intervaloMinuto
 export async function criarRegraDisponibilidade(input: {
   profissionalId: number;
   diaSemana: number;
-  horarioInicio: string; // formato "HH:mm"
+  horarioInicio: string;
   horarioFim: string;
   intervaloMinutos: number;
 }) {
@@ -45,9 +45,6 @@ export async function criarRegraDisponibilidade(input: {
   return rows[0] as RegraDisponibilidade;
 }
 
-// Cria a regra do dia se não existir, ou atualiza se já existir — depende da
-// constraint única (profissional_id, dia_semana). Usada pela tela do painel,
-// onde o usuário só pensa em "editar o horário de terça", não em criar vs. atualizar.
 export async function upsertRegraDisponibilidade(input: {
   profissionalId: number;
   diaSemana: number;
@@ -78,8 +75,6 @@ export async function upsertRegraDisponibilidade(input: {
   return rows[0] as RegraDisponibilidade;
 }
 
-// Remove a regra do dia — na prática, "fechar" esse dia da semana (sem
-// regra, consultarHorariosDisponiveis não oferece nenhum horário nele).
 export async function removerRegraDisponibilidade(profissionalId: number, diaSemana: number) {
   await pool.query(
     `DELETE FROM regras_disponibilidade WHERE profissional_id = $1 AND dia_semana = $2`,
@@ -117,8 +112,6 @@ export async function criarBloqueio(input: {
   return rows[0];
 }
 
-// Só bloqueios que ainda não terminaram — os passados não afetam mais nenhum
-// agendamento futuro, então não tem por que a tela mostrar pra sempre.
 export async function listarBloqueios(profissionalId: number) {
   const { rows } = await pool.query(
     `SELECT * FROM indisponibilidades
@@ -221,6 +214,61 @@ export async function consultarHorariosDisponiveis(
     );
     return !conflitaBloqueio;
   });
+}
+
+// Pro fluxo do bot com múltiplos profissionais: em vez de calcular horários
+// livres pra um profissional específico, calcula a UNIÃO dos horários livres
+// de todos os profissionais que atendem aquele serviço — o cliente escolhe o
+// horário sem saber (nem precisar saber) qual profissional vai atender.
+export async function consultarHorariosDisponiveisParaServico(
+  servicoId: number,
+  data: Date,
+  duracaoMinutos: number,
+): Promise<Date[]> {
+  const { rows: profissionais } = await pool.query(
+    `SELECT p.id FROM profissionais p
+     JOIN profissional_servicos ps ON ps.profissional_id = p.id
+     WHERE ps.servico_id = $1 AND p.ativo = true`,
+    [servicoId],
+  );
+
+  const conjunto = new Map<number, Date>();
+  for (const { id: profissionalId } of profissionais) {
+    const horarios = await consultarHorariosDisponiveis(profissionalId, data, duracaoMinutos);
+    for (const horario of horarios) {
+      conjunto.set(horario.getTime(), horario);
+    }
+  }
+
+  return [...conjunto.values()].sort((a, b) => a.getTime() - b.getTime());
+}
+
+// No momento de confirmar (não de listar), decide QUAL profissional específico
+// vai ficar com o agendamento — o primeiro, entre os que atendem o serviço,
+// que estiver realmente livre naquele instante exato. Reconfere do zero (não
+// reaproveita o resultado da listagem), porque o tempo passou entre o cliente
+// ver a lista e confirmar, e outro agendamento pode ter ocupado o horário.
+export async function obterProfissionalDisponivel(
+  servicoId: number,
+  dataHora: Date,
+  duracaoMinutos: number,
+): Promise<number> {
+  const { rows: profissionais } = await pool.query(
+    `SELECT p.id FROM profissionais p
+     JOIN profissional_servicos ps ON ps.profissional_id = p.id
+     WHERE ps.servico_id = $1 AND p.ativo = true
+     ORDER BY p.id`,
+    [servicoId],
+  );
+
+  for (const { id: profissionalId } of profissionais) {
+    const horarios = await consultarHorariosDisponiveis(profissionalId, dataHora, duracaoMinutos);
+    if (horarios.some((h) => h.getTime() === dataHora.getTime())) {
+      return profissionalId;
+    }
+  }
+
+  throw new AppError('Esse horário acabou de ser ocupado, escolha outro');
 }
 
 export async function validarHorarioDisponivel(

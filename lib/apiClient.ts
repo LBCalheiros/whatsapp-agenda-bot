@@ -18,7 +18,7 @@ export async function apiFetch<T>(input: string, init?: RequestInit): Promise<T>
   const dados = await response.json().catch(() => null);
 
   if (!response.ok) {
-    const mensagem = dados?.erro ?? 'Erro inesperado';
+    const mensagem = dados?.error ?? 'Erro inesperado';
     throw new ApiError(mensagem, response.status);
   }
 

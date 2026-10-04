@@ -2,9 +2,12 @@ import { pool } from '@/infra/database';
 import { enviarMensagemTexto, enviarMensagemBotoes } from '@/infra/whatsapp';
 import { AppError } from '@/infra/errors';
 import { comLockDeConversa } from '@/infra/lockConversa';
-import { formatarDataHora } from '@/infra/data';
+import { formatarDataHora, paraHorarioLocal } from '@/infra/data';
 import { buscarOuCriarClientePorTelefone } from '@/models/cliente';
-import { consultarHorariosDisponiveis } from '@/models/disponibilidade';
+import {
+  consultarHorariosDisponiveisParaServico,
+  obterProfissionalDisponivel,
+} from '@/models/disponibilidade';
 import {
   ANTECEDENCIA_MINIMA_HORAS,
   criarAgendamento,
@@ -23,6 +26,7 @@ import { logger } from '@/infra/logger';
 const TIMEOUT_MINUTOS = 10;
 const DIAS_BUSCA_HORARIOS = 7;
 const MAX_HORARIOS_EXIBIDOS = 3; // limite de botões por mensagem interativa do WhatsApp
+const MAX_AGENDAMENTOS_LISTADOS = 2; // + botão Voltar = 3, limite de botões do WhatsApp
 
 const BOTOES_MENU = [
   { id: 'menu_agendar', titulo: 'Agendar horário' },
@@ -77,9 +81,11 @@ async function atualizarEstado(
 // agendamento específico em foco); 'menu' e 'aguardando_atendente' não têm nada a perder
 // esperando, então um clique atrasado neles ainda deve ser processado normalmente.
 const ESTADOS_COM_CONTEXTO_TEMPORAL = [
+  'fluxo_agendamento_escolhendo_servico',
   'fluxo_agendamento_escolhendo_horario',
   'fluxo_agendamento_confirmando',
   'fluxo_ver_agendamentos',
+  'fluxo_agendamento_acao',
   'fluxo_cancelamento_confirmando',
   'fluxo_remarcar_escolhendo_horario',
   'fluxo_remarcar_confirmando',
@@ -154,6 +160,10 @@ async function processarMensagemInterna(telefone: string, entrada: Entrada) {
       await processarMenu(telefone, entrada);
       break;
 
+    case 'fluxo_agendamento_escolhendo_servico':
+      await processarEscolhaServico(telefone, entrada);
+      break;
+
     case 'fluxo_agendamento_escolhendo_horario':
       await processarEscolhaHorario(telefone, entrada, conversa.contexto);
       break;
@@ -163,7 +173,11 @@ async function processarMensagemInterna(telefone: string, entrada: Entrada) {
       break;
 
     case 'fluxo_ver_agendamentos':
-      await processarCancelamento(telefone, entrada, conversa.contexto);
+      await processarEscolhaAgendamento(telefone, entrada, conversa.contexto);
+      break;
+
+    case 'fluxo_agendamento_acao':
+      await processarAcaoAgendamento(telefone, entrada, conversa.contexto);
       break;
 
     case 'fluxo_cancelamento_confirmando':
@@ -224,40 +238,26 @@ async function processarMenu(telefone: string, entrada: Entrada) {
 
 // --- Fluxo: agendar horário ---
 
-async function obterProfissionalEServicoPadrao(): Promise<{
-  profissionalId: number;
-  servicoId: number;
-  duracaoMinutos: number;
-} | null> {
-  // MVP: uma empresa = um profissional e um serviço, os dois primeiros ativos cadastrados.
-  // Quando o projeto suportar múltiplos, isso vira uma escolha por botão dentro do fluxo.
-  const { rows: profissionais } = await pool.query(
-    `SELECT id FROM profissionais WHERE ativo = true ORDER BY id LIMIT 1`,
+async function listarServicosAtivos(): Promise<
+  { id: number; nome: string; duracaoMinutos: number }[]
+> {
+  const { rows } = await pool.query(
+    `SELECT id, nome, duracao_minutos FROM servicos WHERE ativo = true ORDER BY nome`,
   );
-  const { rows: servicos } = await pool.query(
-    `SELECT id, duracao_minutos FROM servicos WHERE ativo = true ORDER BY id LIMIT 1`,
-  );
-
-  if (profissionais.length === 0 || servicos.length === 0) return null;
-
-  return {
-    profissionalId: profissionais[0].id,
-    servicoId: servicos[0].id,
-    duracaoMinutos: servicos[0].duracao_minutos,
-  };
+  return rows.map((r) => ({ id: r.id, nome: r.nome, duracaoMinutos: r.duracao_minutos }));
 }
 
-async function buscarProximosHorarios(
-  profissionalId: number,
-  duracaoMinutos: number,
-): Promise<Date[]> {
+// Horários livres pro serviço, agregando TODOS os profissionais que atendem
+// ele (não um profissional fixo) — o cliente escolhe o horário, o sistema
+// decide quem atende na hora de confirmar.
+async function buscarProximosHorarios(servicoId: number, duracaoMinutos: number): Promise<Date[]> {
   const agora = Date.now();
   const antecedenciaMinimaMs = ANTECEDENCIA_MINIMA_HORAS * 60 * 60 * 1000;
   const encontrados: Date[] = [];
 
   for (let i = 0; i < DIAS_BUSCA_HORARIOS && encontrados.length < MAX_HORARIOS_EXIBIDOS; i++) {
     const dia = new Date(agora + i * 24 * 60 * 60 * 1000);
-    const horarios = await consultarHorariosDisponiveis(profissionalId, dia, duracaoMinutos);
+    const horarios = await consultarHorariosDisponiveisParaServico(servicoId, dia, duracaoMinutos);
 
     for (const horario of horarios) {
       if (encontrados.length >= MAX_HORARIOS_EXIBIDOS) break;
@@ -271,33 +271,68 @@ async function buscarProximosHorarios(
 }
 
 async function iniciarFluxoAgendamento(telefone: string) {
-  const padrao = await obterProfissionalEServicoPadrao();
+  const servicos = await listarServicosAtivos();
 
-  if (!padrao) {
+  if (servicos.length === 0) {
     await enviarMensagemBotoes({
       telefone,
-      corpo: 'No momento não há profissionais ou serviços configurados.',
+      corpo: 'No momento não há serviços configurados.',
       botoes: BOTAO_ATENDENTE_E_VOLTAR,
     });
     await atualizarEstado(telefone, 'menu');
     return;
   }
 
-  await exibirHorariosDisponiveis(
+  if (servicos.length === 1) {
+    await exibirHorariosDisponiveis(telefone, servicos[0].id, servicos[0].duracaoMinutos);
+    return;
+  }
+
+  // mais de um serviço: cliente escolhe primeiro. Limite de 3 botões por
+  // mensagem do WhatsApp — com mais de 3 serviços ativos, só os 3 primeiros
+  // (por nome) aparecem aqui; não existe paginação ainda.
+  await atualizarEstado(telefone, 'fluxo_agendamento_escolhendo_servico');
+  await enviarMensagemBotoes({
     telefone,
-    padrao.profissionalId,
-    padrao.servicoId,
-    padrao.duracaoMinutos,
+    corpo: 'Qual serviço você quer agendar?',
+    botoes: servicos.slice(0, MAX_HORARIOS_EXIBIDOS).map((s) => ({
+      id: `servico_${s.id}`,
+      titulo: s.nome,
+    })),
+  });
+}
+
+async function processarEscolhaServico(telefone: string, entrada: Entrada) {
+  if (entrada.tipo !== 'botao' || !entrada.id.startsWith('servico_')) {
+    await enviarMensagemTexto(
+      telefone,
+      'Por favor, escolha um dos serviços enviados, ou toque em Voltar.',
+    );
+    return;
+  }
+
+  const servicoId = Number(entrada.id.slice('servico_'.length));
+  const { rows } = await pool.query(
+    `SELECT duracao_minutos FROM servicos WHERE id = $1 AND ativo = true`,
+    [servicoId],
   );
+
+  if (rows.length === 0) {
+    await enviarMensagemTexto(telefone, 'Esse serviço não está mais disponível.');
+    await atualizarEstado(telefone, 'menu');
+    await enviarMenu(telefone);
+    return;
+  }
+
+  await exibirHorariosDisponiveis(telefone, servicoId, rows[0].duracao_minutos);
 }
 
 async function exibirHorariosDisponiveis(
   telefone: string,
-  profissionalId: number,
   servicoId: number,
   duracaoMinutos: number,
 ) {
-  const horarios = await buscarProximosHorarios(profissionalId, duracaoMinutos);
+  const horarios = await buscarProximosHorarios(servicoId, duracaoMinutos);
 
   if (horarios.length === 0) {
     await enviarMensagemBotoes({
@@ -310,7 +345,6 @@ async function exibirHorariosDisponiveis(
   }
 
   await atualizarEstado(telefone, 'fluxo_agendamento_escolhendo_horario', {
-    profissionalId,
     servicoId,
     duracaoMinutos,
   });
@@ -339,12 +373,10 @@ async function processarEscolhaHorario(
   }
 
   const dataHoraIso = entrada.id.slice('slot_'.length);
-  const profissionalId = contexto?.profissionalId as number;
   const servicoId = contexto?.servicoId as number;
   const duracaoMinutos = contexto?.duracaoMinutos as number;
 
   await atualizarEstado(telefone, 'fluxo_agendamento_confirmando', {
-    profissionalId,
     servicoId,
     duracaoMinutos,
     dataHora: dataHoraIso,
@@ -360,18 +392,40 @@ async function processarEscolhaHorario(
   });
 }
 
+// Mesmo dia (horário de Brasília) == sem janela normal de 24h pra cancelar,
+// então a confirmação precisa deixar isso bem claro na hora, já que é a
+// única chance prática do cliente perceber um erro de data/horário.
+function ehHojeBRT(data: Date): boolean {
+  const local = paraHorarioLocal(data);
+  const agoraLocal = paraHorarioLocal(new Date());
+  return (
+    local.getUTCFullYear() === agoraLocal.getUTCFullYear() &&
+    local.getUTCMonth() === agoraLocal.getUTCMonth() &&
+    local.getUTCDate() === agoraLocal.getUTCDate()
+  );
+}
+
+function mensagemConfirmacaoAgendamento(dataHora: Date): string {
+  const base = `Agendamento confirmado para ${formatarDataHora(dataHora)}. ✅`;
+
+  if (ehHojeBRT(dataHora)) {
+    return `${base}\n\n⚠️ Esse horário é hoje — confira com atenção se a data e o horário estão certos. Por ser no mesmo dia, não é possível cancelar pelo prazo normal de 24h; qualquer ajuste precisa ser feito falando com um atendente.`;
+  }
+
+  return `${base}\n\nLembrando: cancelamentos só podem ser feitos até 24h antes do horário marcado.`;
+}
+
 async function processarConfirmacao(
   telefone: string,
   entrada: Entrada,
   contexto: Record<string, unknown> | null,
 ) {
-  const profissionalId = contexto?.profissionalId as number;
   const servicoId = contexto?.servicoId as number;
   const duracaoMinutos = contexto?.duracaoMinutos as number;
   const dataHoraIso = contexto?.dataHora as string;
 
   if (entrada.tipo === 'botao' && entrada.id === 'abortar_agendamento') {
-    await exibirHorariosDisponiveis(telefone, profissionalId, servicoId, duracaoMinutos);
+    await exibirHorariosDisponiveis(telefone, servicoId, duracaoMinutos);
     return;
   }
 
@@ -381,35 +435,36 @@ async function processarConfirmacao(
   }
 
   try {
+    const dataHora = new Date(dataHoraIso);
+    // decide AGORA (não na listagem) qual profissional específico atende —
+    // reconfere do zero, porque o tempo passou entre o cliente ver a lista
+    // e confirmar, e outro agendamento pode ter ocupado esse horário
+    const profissionalId = await obterProfissionalDisponivel(servicoId, dataHora, duracaoMinutos);
+
     const cliente = await buscarOuCriarClientePorTelefone(telefone);
     await criarAgendamento({
       clienteId: cliente.id,
       profissionalId,
       servicoId,
-      dataHora: new Date(dataHoraIso),
+      dataHora,
     });
 
     await atualizarEstado(telefone, 'menu');
-    await enviarMensagemTexto(
-      telefone,
-      `Agendamento confirmado para ${formatarDataHora(new Date(dataHoraIso))}. ✅\n\nLembrando: cancelamentos só podem ser feitos até 24h antes do horário marcado.`,
-    );
+    await enviarMensagemTexto(telefone, mensagemConfirmacaoAgendamento(dataHora));
     await enviarMenu(telefone);
   } catch (error) {
     if (error instanceof AppError) {
       // horário ocupado por concorrência, ou caiu abaixo da antecedência mínima
       // enquanto o cliente decidia: informa e mostra horários atualizados.
       await enviarMensagemTexto(telefone, error.message);
-      await exibirHorariosDisponiveis(telefone, profissionalId, servicoId, duracaoMinutos);
+      await exibirHorariosDisponiveis(telefone, servicoId, duracaoMinutos);
       return;
     }
     throw error;
   }
 }
 
-// --- Fluxo: ver / cancelar agendamentos ---
-
-const MAX_AGENDAMENTOS_CANCELAVEIS = 2; // + botão Voltar = 3, limite de botões do WhatsApp
+// --- Fluxo: ver agendamentos (escolher um, depois cancelar ou remarcar) ---
 
 async function iniciarFluxoVerAgendamentos(telefone: string) {
   const { rows: clientes } = await pool.query(`SELECT id FROM clientes WHERE telefone = $1`, [
@@ -441,28 +496,28 @@ async function iniciarFluxoVerAgendamentos(telefone: string) {
     return;
   }
 
-  // já vem ordenado por data_hora crescente; cancelamento guiado cobre os mais próximos
-  const canceláveis = agendamentos.slice(0, MAX_AGENDAMENTOS_CANCELAVEIS);
+  // já vem ordenado por data_hora crescente; cobre os mais próximos primeiro
+  const selecionaveis = agendamentos.slice(0, MAX_AGENDAMENTOS_LISTADOS);
 
   const lista = agendamentos
     .map((a) => `• ${formatarDataHora(new Date(a.data_hora))} — ${a.servico_nome}`)
     .join('\n');
 
   const aviso =
-    agendamentos.length > MAX_AGENDAMENTOS_CANCELAVEIS
-      ? `\n\nMostrando os ${MAX_AGENDAMENTOS_CANCELAVEIS} mais próximos pra cancelar por aqui. Pra cancelar os outros, fale com um atendente.`
+    agendamentos.length > MAX_AGENDAMENTOS_LISTADOS
+      ? `\n\nMostrando os ${MAX_AGENDAMENTOS_LISTADOS} mais próximos por aqui. Pra mexer nos outros, fale com um atendente.`
       : '';
 
   await atualizarEstado(telefone, 'fluxo_ver_agendamentos', {
-    agendamentoIds: canceláveis.map((a) => a.id),
+    agendamentoIds: selecionaveis.map((a) => a.id),
   });
 
   await enviarMensagemBotoes({
     telefone,
-    corpo: `Seus agendamentos:\n${lista}${aviso}\n\nToque em um horário abaixo pra cancelar:`,
+    corpo: `Seus agendamentos:\n${lista}${aviso}\n\nToque em um agendamento abaixo pra ver as opções:`,
     botoes: [
-      ...canceláveis.map((a) => ({
-        id: `cancelar_agendamento_${a.id}`,
+      ...selecionaveis.map((a) => ({
+        id: `agendamento_${a.id}`,
         titulo: formatarDataHora(new Date(a.data_hora)),
       })),
       ...BOTAO_VOLTAR,
@@ -470,28 +525,28 @@ async function iniciarFluxoVerAgendamentos(telefone: string) {
   });
 }
 
-async function processarCancelamento(
+async function processarEscolhaAgendamento(
   telefone: string,
   entrada: Entrada,
   contexto: Record<string, unknown> | null,
 ) {
   const agendamentoIds = (contexto?.agendamentoIds as number[]) ?? [];
 
-  if (entrada.tipo !== 'botao' || !entrada.id.startsWith('cancelar_agendamento_')) {
+  if (entrada.tipo !== 'botao' || !entrada.id.startsWith('agendamento_')) {
     await enviarMensagemTexto(
       telefone,
-      'Por favor, toque em um dos horários enviados, ou em Voltar.',
+      'Por favor, toque em um dos agendamentos enviados, ou em Voltar.',
     );
     return;
   }
 
-  const agendamentoId = Number(entrada.id.slice('cancelar_agendamento_'.length));
+  const agendamentoId = Number(entrada.id.slice('agendamento_'.length));
 
   if (!agendamentoIds.includes(agendamentoId)) {
     // proteção contra id fora da lista que foi oferecida (payload adulterado ou conversa velha)
     await enviarMensagemTexto(
       telefone,
-      'Esse agendamento não está mais disponível pra cancelar por aqui.',
+      'Esse agendamento não está mais disponível por aqui.',
     );
     await atualizarEstado(telefone, 'menu');
     await enviarMenu(telefone);
@@ -500,7 +555,37 @@ async function processarCancelamento(
 
   const agendamento = await buscarPorId(agendamentoId);
 
-  await abrirConfirmacaoCancelamento(telefone, agendamentoId, new Date(agendamento.data_hora));
+  await atualizarEstado(telefone, 'fluxo_agendamento_acao', { agendamentoId });
+  await enviarMensagemBotoes({
+    telefone,
+    corpo: `O que você quer fazer com o agendamento de ${formatarDataHora(new Date(agendamento.data_hora))}?`,
+    botoes: [
+      { id: 'acao_cancelar', titulo: 'Cancelar' },
+      { id: 'acao_remarcar', titulo: 'Remarcar' },
+      ...BOTAO_VOLTAR,
+    ],
+  });
+}
+
+async function processarAcaoAgendamento(
+  telefone: string,
+  entrada: Entrada,
+  contexto: Record<string, unknown> | null,
+) {
+  const agendamentoId = contexto?.agendamentoId as number;
+
+  if (entrada.tipo === 'botao' && entrada.id === 'acao_cancelar') {
+    const agendamento = await buscarPorId(agendamentoId);
+    await abrirConfirmacaoCancelamento(telefone, agendamentoId, new Date(agendamento.data_hora));
+    return;
+  }
+
+  if (entrada.tipo === 'botao' && entrada.id === 'acao_remarcar') {
+    await iniciarFluxoRemarcar(telefone, agendamentoId);
+    return;
+  }
+
+  await enviarMensagemTexto(telefone, 'Por favor, toque em Cancelar, Remarcar ou Voltar.');
 }
 
 async function abrirConfirmacaoCancelamento(
@@ -554,6 +639,10 @@ async function processarConfirmacaoCancelamento(
 }
 
 // --- Fluxo: remarcar (reagendar) agendamento ---
+// Mesma lógica multi-profissional do agendamento novo: o cliente escolhe o
+// horário sem escolher profissional, e reagendarAgendamento (backend) decide
+// quem fica com o agendamento (tenta manter o profissional original, só troca
+// se ele não estiver livre no novo horário).
 
 async function iniciarFluxoRemarcar(telefone: string, agendamentoId: number) {
   const agendamento = await buscarPorId(agendamentoId);
@@ -574,21 +663,16 @@ async function iniciarFluxoRemarcar(telefone: string, agendamentoId: number) {
     return;
   }
 
-  await exibirHorariosParaRemarcar(
-    telefone,
-    agendamentoId,
-    agendamento.profissional_id,
-    duracaoMinutos,
-  );
+  await exibirHorariosParaRemarcar(telefone, agendamentoId, agendamento.servico_id, duracaoMinutos);
 }
 
 async function exibirHorariosParaRemarcar(
   telefone: string,
   agendamentoId: number,
-  profissionalId: number,
+  servicoId: number,
   duracaoMinutos: number,
 ) {
-  const horarios = await buscarProximosHorarios(profissionalId, duracaoMinutos);
+  const horarios = await buscarProximosHorarios(servicoId, duracaoMinutos);
 
   if (horarios.length === 0) {
     await enviarMensagemBotoes({
@@ -602,7 +686,7 @@ async function exibirHorariosParaRemarcar(
 
   await atualizarEstado(telefone, 'fluxo_remarcar_escolhendo_horario', {
     agendamentoId,
-    profissionalId,
+    servicoId,
     duracaoMinutos,
   });
 
@@ -631,12 +715,12 @@ async function processarEscolhaHorarioRemarcar(
 
   const novaDataHoraIso = entrada.id.slice('remarcar_slot_'.length);
   const agendamentoId = contexto?.agendamentoId as number;
-  const profissionalId = contexto?.profissionalId as number;
+  const servicoId = contexto?.servicoId as number;
   const duracaoMinutos = contexto?.duracaoMinutos as number;
 
   await atualizarEstado(telefone, 'fluxo_remarcar_confirmando', {
     agendamentoId,
-    profissionalId,
+    servicoId,
     duracaoMinutos,
     novaDataHora: novaDataHoraIso,
   });
@@ -657,12 +741,12 @@ async function processarConfirmacaoRemarcacao(
   contexto: Record<string, unknown> | null,
 ) {
   const agendamentoId = contexto?.agendamentoId as number;
-  const profissionalId = contexto?.profissionalId as number;
+  const servicoId = contexto?.servicoId as number;
   const duracaoMinutos = contexto?.duracaoMinutos as number;
   const novaDataHoraIso = contexto?.novaDataHora as string;
 
   if (entrada.tipo === 'botao' && entrada.id === 'abortar_remarcacao') {
-    await exibirHorariosParaRemarcar(telefone, agendamentoId, profissionalId, duracaoMinutos);
+    await exibirHorariosParaRemarcar(telefone, agendamentoId, servicoId, duracaoMinutos);
     return;
   }
 
@@ -683,7 +767,7 @@ async function processarConfirmacaoRemarcacao(
     if (error instanceof AppError) {
       // horário ocupado por concorrência, ou caiu abaixo da antecedência mínima
       await enviarMensagemTexto(telefone, error.message);
-      await exibirHorariosParaRemarcar(telefone, agendamentoId, profissionalId, duracaoMinutos);
+      await exibirHorariosParaRemarcar(telefone, agendamentoId, servicoId, duracaoMinutos);
       return;
     }
     throw error;
