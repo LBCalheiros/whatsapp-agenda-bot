@@ -1,11 +1,7 @@
 import { pool } from '@/infra/database';
 import { AppError } from '@/infra/errors';
 import { fimDoDiaBRT, inicioDoDiaBRT } from '@/infra/data';
-import {
-  consultarHorariosDisponiveis,
-  obterProfissionalDisponivel,
-  validarHorarioDisponivel,
-} from '@/models/disponibilidade';
+import { obterProfissionalDisponivel, validarHorarioDisponivel } from '@/models/disponibilidade';
 import { buscarAntecedenciaMinima, profissionalAtendeServico } from '@/models/profissional';
 
 type Agendamento = {
@@ -75,6 +71,7 @@ export async function criarAgendamento(input: {
 }
 
 export async function listarAgendamentos(filtros: {
+  clienteId?: number;
   profissionalId?: number;
   servicoId?: number;
   buscaCliente?: string;
@@ -87,6 +84,10 @@ export async function listarAgendamentos(filtros: {
   const condicoes: string[] = [];
   const valores: unknown[] = [];
 
+  if (filtros.clienteId) {
+    valores.push(filtros.clienteId);
+    condicoes.push(`a.cliente_id = $${valores.length}`);
+  }
   if (filtros.profissionalId) {
     valores.push(filtros.profissionalId);
     condicoes.push(`a.profissional_id = $${valores.length}`);
@@ -233,9 +234,6 @@ export async function cancelarComoCliente(agendamentoId: number) {
   return cancelarAgendamento(agendamentoId);
 }
 
-// Marca manualmente como concluído (botão no painel) ou chamada pelo cron
-// automático — as duas vias passam por aqui, pra garantir o mesmo registro
-// de histórico e as mesmas regras nos dois casos.
 export async function marcarComoCompleto(agendamentoId: number) {
   const agendamento = await buscarPorId(agendamentoId);
 
@@ -252,10 +250,6 @@ export async function marcarComoCompleto(agendamentoId: number) {
   return { ...agendamento, status: 'completo' };
 }
 
-// Usada pelo cron: acha todo agendamento 'agendado'/'confirmado' cujo horário
-// de término (data_hora + duração do serviço) já passou, e marca como
-// 'completo' um por um (reaproveitando marcarComoCompleto, pelo histórico).
-// Retorna quantos foram concluídos nessa execução.
 export async function concluirAgendamentosPassados(): Promise<number> {
   const { rows } = await pool.query(
     `SELECT a.id
@@ -272,16 +266,12 @@ export async function concluirAgendamentosPassados(): Promise<number> {
   return rows.length;
 }
 
+// Sem apego a nenhum profissional específico: resolve do zero quem está
+// disponível pro mesmo serviço no novo horário, exatamente como um
+// agendamento novo. Não existe "tentar manter o original" — é sempre
+// "qualquer um que atenda o serviço e esteja livre nesse horário".
 export async function reagendarAgendamento(agendamentoId: number, novaDataHora: Date) {
   const agendamento = await buscarPorId(agendamentoId);
-
-  const antecedenciaMinimaHoras = await buscarAntecedenciaMinima(agendamento.profissional_id);
-  const horasAteNovoAgendamento = (novaDataHora.getTime() - Date.now()) / (1000 * 60 * 60);
-  if (horasAteNovoAgendamento < antecedenciaMinimaHoras) {
-    throw new AppError(
-      `Reagendamentos precisam ser feitos com pelo menos ${antecedenciaMinimaHoras}h de antecedência`,
-    );
-  }
 
   const { rows: servicos } = await pool.query(
     `SELECT duracao_minutos FROM servicos WHERE id = $1`,
@@ -289,23 +279,17 @@ export async function reagendarAgendamento(agendamentoId: number, novaDataHora: 
   );
   const duracaoMinutos = servicos[0].duracao_minutos;
 
-  // tenta manter o mesmo profissional; só troca pra outro que atenda o mesmo
-  // serviço se o original não estiver livre nesse novo horário específico
-  let profissionalId = agendamento.profissional_id;
-  const horariosDoOriginal = await consultarHorariosDisponiveis(
-    profissionalId,
+  const profissionalId = await obterProfissionalDisponivel(
+    agendamento.servico_id,
     novaDataHora,
     duracaoMinutos,
   );
-  const originalContinuaLivre = horariosDoOriginal.some(
-    (d) => d.getTime() === novaDataHora.getTime(),
-  );
 
-  if (!originalContinuaLivre) {
-    profissionalId = await obterProfissionalDisponivel(
-      agendamento.servico_id,
-      novaDataHora,
-      duracaoMinutos,
+  const antecedenciaMinimaHoras = await buscarAntecedenciaMinima(profissionalId);
+  const horasAteNovoAgendamento = (novaDataHora.getTime() - Date.now()) / (1000 * 60 * 60);
+  if (horasAteNovoAgendamento < antecedenciaMinimaHoras) {
+    throw new AppError(
+      `Reagendamentos precisam ser feitos com pelo menos ${antecedenciaMinimaHoras}h de antecedência`,
     );
   }
 
