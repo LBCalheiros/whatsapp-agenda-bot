@@ -70,6 +70,7 @@ export async function POST(request: Request) {
   }
 
   const assinatura = request.headers.get('x-hub-signature-256');
+
   if (!verificarAssinaturaWebhook(payload, assinatura)) {
     logger.warn('Webhook recusado: assinatura inválida');
     return new Response('Forbidden', { status: 403 });
@@ -85,6 +86,7 @@ export async function POST(request: Request) {
       }>;
     }>;
   };
+
   try {
     body = JSON.parse(payload);
   } catch (error) {
@@ -92,52 +94,92 @@ export async function POST(request: Request) {
     return Response.json({ ok: false }, { status: 400 });
   }
 
-  const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+  let quantidadeMensagens = 0;
+  let quantidadeStatus = 0;
 
-  if (!message) {
-    const statuses = body.entry?.[0]?.changes?.[0]?.value?.statuses ?? [];
-    const falhas = statuses.filter((s) => s.status === 'failed');
+  for (const entry of body.entry ?? []) {
+    for (const change of entry.changes ?? []) {
+      const value = change.value;
 
-    if (falhas.length > 0) {
-      logger.error({ falhas }, 'Falha de entrega reportada pela Meta');
-    } else {
-      logger.info({ quantidade: statuses.length }, 'Webhook recebido sem mensagem de cliente');
+      if (!value) {
+        continue;
+      }
+
+      const statuses = value.statuses ?? [];
+      quantidadeStatus += statuses.length;
+
+      const falhas = statuses.filter((status) => status.status === 'failed');
+
+      if (falhas.length > 0) {
+        logger.error({ falhas }, 'Falha de entrega reportada pela Meta');
+      }
+
+      for (const message of value.messages ?? []) {
+        quantidadeMensagens++;
+
+        const numeroCliente = message.from;
+        const messageId = message.id;
+
+        logger.info(
+          {
+            numeroCliente,
+            ...resumirMensagem(message),
+          },
+          'Mensagem recebida do WhatsApp',
+        );
+
+        if (!messageId) {
+          logger.warn(
+            { numeroCliente },
+            'Mensagem sem message.id — processando sem checagem de duplicidade',
+          );
+
+          try {
+            await processarConteudo(numeroCliente, message);
+          } catch (error) {
+            logger.error(
+              { error, numeroCliente },
+              'Erro ao processar webhook do WhatsApp (sem message.id)',
+            );
+
+            return Response.json({ ok: false }, { status: 500 });
+          }
+
+          continue;
+        }
+
+        const podeProcessar = await reivindicarMensagem(messageId);
+
+        if (!podeProcessar) {
+          logger.info({ messageId }, 'Mensagem duplicada da Meta, ignorando');
+
+          continue;
+        }
+
+        try {
+          await processarConteudo(numeroCliente, message);
+        } catch (error) {
+          await liberarMensagem(messageId);
+
+          logger.error({ error, messageId }, 'Erro ao processar webhook do WhatsApp');
+
+          return Response.json({ ok: false }, { status: 500 });
+        }
+      }
     }
-
-    return Response.json({ ok: true });
   }
 
-  const numeroCliente = message.from;
-  const messageId = message.id;
-
-  logger.info({ numeroCliente, ...resumirMensagem(message) }, 'Mensagem recebida do WhatsApp');
-
-  if (!messageId) {
-    logger.warn(
-      { numeroCliente },
-      'Mensagem sem message.id — processando sem checagem de duplicidade',
+  if (quantidadeMensagens === 0 && quantidadeStatus === 0) {
+    logger.info('Webhook recebido sem mensagens ou status');
+  } else {
+    logger.info(
+      {
+        quantidadeMensagens,
+        quantidadeStatus,
+      },
+      'Webhook processado',
     );
-    try {
-      await processarConteudo(numeroCliente, message);
-      return Response.json({ ok: true });
-    } catch (error) {
-      logger.error({ error }, 'Erro ao processar webhook do WhatsApp (sem message.id)');
-      return Response.json({ ok: false }, { status: 500 });
-    }
   }
 
-  const podeProcessar = await reivindicarMensagem(messageId);
-  if (!podeProcessar) {
-    logger.info({ messageId }, 'Mensagem duplicada da Meta, ignorando');
-    return Response.json({ ok: true });
-  }
-
-  try {
-    await processarConteudo(numeroCliente, message);
-    return Response.json({ ok: true });
-  } catch (error) {
-    await liberarMensagem(messageId);
-    logger.error({ error, messageId }, 'Erro ao processar webhook do WhatsApp');
-    return Response.json({ ok: false }, { status: 500 });
-  }
+  return Response.json({ ok: true });
 }

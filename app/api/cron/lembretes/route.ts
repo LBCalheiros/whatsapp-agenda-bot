@@ -2,12 +2,8 @@ import { logger } from '@/infra/logger';
 import { pool } from '@/infra/database';
 import { enviarMensagemTemplateComBotoes } from '@/infra/whatsapp';
 import { formatarDataHora, inicioDoDiaBRT, fimDoDiaBRT } from '@/infra/data';
+import { comLockDeAgendamento } from '@/infra/lockAgendamento';
 
-// Nome e estrutura precisam bater exatamente com um template aprovado no Meta Business
-// Manager (corpo com 2 variáveis: data/hora e nome do serviço; 2 botões quick_reply).
-// Enquanto esse template não existir aprovado, essa rota vai falhar no envio real (a
-// query e o resto da lógica funcionam normalmente, só o enviarMensagemTemplateComBotoes
-// vai retornar erro da API do Meta).
 const NOME_TEMPLATE_LEMBRETE = 'lembrete_agendamento_24h';
 const IDIOMA_TEMPLATE = 'pt_BR';
 
@@ -38,27 +34,48 @@ export async function GET(request: Request) {
 
   for (const agendamento of agendamentos) {
     try {
-      await enviarMensagemTemplateComBotoes({
-        telefone: agendamento.telefone,
-        nomeTemplate: NOME_TEMPLATE_LEMBRETE,
-        idiomaCodigo: IDIOMA_TEMPLATE,
-        parametrosCorpo: [
-          formatarDataHora(new Date(agendamento.data_hora)),
-          agendamento.servico_nome,
-        ],
-        payloadsBotoes: [
-          `lembrete_remarcar_${agendamento.id}`,
-          `lembrete_cancelar_${agendamento.id}`,
-        ],
-      });
+      await comLockDeAgendamento(agendamento.id, async () => {
+        const { rows } = await pool.query(
+          `SELECT
+           a.id,
+           a.data_hora,
+           a.lembrete_enviado,
+           c.telefone,
+           s.nome AS servico_nome
+         FROM agendamentos a
+         JOIN clientes c ON c.id = a.cliente_id
+         JOIN servicos s ON s.id = a.servico_id
+         WHERE a.id = $1`,
+          [agendamento.id],
+        );
 
-      await pool.query(`UPDATE agendamentos SET lembrete_enviado = true WHERE id = $1`, [
-        agendamento.id,
-      ]);
-      enviados++;
+        const atual = rows[0];
+
+        if (!atual || atual.lembrete_enviado) {
+          return;
+        }
+
+        await enviarMensagemTemplateComBotoes({
+          telefone: atual.telefone,
+          nomeTemplate: NOME_TEMPLATE_LEMBRETE,
+          idiomaCodigo: IDIOMA_TEMPLATE,
+          parametrosCorpo: [formatarDataHora(new Date(atual.data_hora)), atual.servico_nome],
+          payloadsBotoes: [`lembrete_remarcar_${atual.id}`, `lembrete_cancelar_${atual.id}`],
+        });
+
+        await pool.query(
+          `UPDATE agendamentos
+         SET lembrete_enviado = true
+         WHERE id = $1
+           AND lembrete_enviado = false`,
+          [atual.id],
+        );
+
+        enviados++;
+      });
     } catch (error) {
-      // lembrete_enviado continua false de propósito, pra permitir reenvio manual pelo painel
       logger.error({ agendamentoId: agendamento.id, error }, 'Falha ao enviar lembrete de 24h');
+
       falhas++;
     }
   }
