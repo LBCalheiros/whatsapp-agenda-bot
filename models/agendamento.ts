@@ -316,15 +316,34 @@ export async function concluirAgendamentosPassados(): Promise<number> {
      WHERE a.status IN ('agendado', 'confirmado')
        AND (
          a.data_hora +
-         (a.duracao_minutos || ' minutes')::interval
+         make_interval(mins => a.duracao_minutos)
        ) < now()`,
   );
 
+  let concluidos = 0;
+
   for (const row of rows) {
-    await marcarComoCompleto(row.id);
+    await comLockDeAgendamento(row.id, async () => {
+      const agendamento = await buscarPorId(row.id);
+
+      if (!['agendado', 'confirmado'].includes(agendamento.status)) {
+        return;
+      }
+
+      const fim = new Date(
+        new Date(agendamento.data_hora).getTime() + agendamento.duracao_minutos * 60_000,
+      );
+
+      if (fim >= new Date()) {
+        return;
+      }
+
+      await marcarComoCompleto(row.id);
+      concluidos++;
+    });
   }
 
-  return rows.length;
+  return concluidos;
 }
 
 export async function reagendarAgendamento(agendamentoId: number, novaDataHora: Date) {
@@ -385,15 +404,15 @@ async function validarConflitoDeHorario(
 ) {
   const { rows } = await pool.query(
     `SELECT 1
-     FROM agendamentos a
-     WHERE a.profissional_id = $1
-       AND a.id <> $2
-       AND a.status != 'cancelado'
-       AND a.data_hora <
-           $3 + ($4 || ' minutes')::interval
-       AND a.data_hora +
-           (a.duracao_minutos || ' minutes')::interval > $3
-     LIMIT 1`,
+   FROM agendamentos a
+   WHERE a.profissional_id = $1
+     AND a.id <> $2
+     AND a.status IN ('agendado', 'confirmado')
+     AND a.data_hora <
+         $3::timestamptz + make_interval(mins => $4::integer)
+     AND a.data_hora +
+         make_interval(mins => a.duracao_minutos) > $3::timestamptz
+   LIMIT 1`,
     [profissionalId, agendamentoId, novaDataHora, duracaoMinutos],
   );
 

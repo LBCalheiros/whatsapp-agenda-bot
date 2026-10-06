@@ -5,6 +5,7 @@ import {
   criarAgendamento,
   cancelarComoCliente,
   reagendarAgendamento,
+  concluirAgendamentosPassados,
 } from '@/models/agendamento';
 import { paraHorarioLocal } from '@/infra/data';
 import { atualizarServico } from '@/models/servico';
@@ -312,6 +313,40 @@ describe('models/agendamento (integração)', () => {
     );
 
     expect(rows.length).toBeGreaterThan(0);
+  });
+
+  it('conclui automaticamente agendamento usando a duração do snapshot', async () => {
+    const servicoSnapshot = await pool.query(
+      `INSERT INTO servicos (nome, duracao_minutos, preco, ativo)
+       VALUES ('Serviço snapshot conclusão Jest', 120, 80, true)
+       RETURNING id`,
+    );
+    const servicoSnapshotId = servicoSnapshot.rows[0].id;
+
+    const inicio = new Date(Date.now() - 45 * 60 * 1000);
+    const agendamento = await pool.query(
+      `INSERT INTO agendamentos
+       (cliente_id, profissional_id, servico_id, data_hora, duracao_minutos, preco)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id`,
+      [clienteId, profissionalId, servicoSnapshotId, inicio, 30, 80],
+    );
+
+    const concluidos = await concluirAgendamentosPassados();
+
+    expect(concluidos).toBeGreaterThanOrEqual(1);
+
+    const atual = await pool.query(`SELECT status FROM agendamentos WHERE id = $1`, [
+      agendamento.rows[0].id,
+    ]);
+    expect(atual.rows[0].status).toBe('completo');
+
+    await pool.query(
+      `DELETE FROM historico_agendamentos WHERE agendamento_id = $1`,
+      [agendamento.rows[0].id],
+    );
+    await pool.query(`DELETE FROM agendamentos WHERE id = $1`, [agendamento.rows[0].id]);
+    await pool.query(`DELETE FROM servicos WHERE id = $1`, [servicoSnapshotId]);
   });
 });
 

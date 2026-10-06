@@ -76,10 +76,12 @@ function FormularioProfissional({
   profissional,
   servicos,
   onSalvo,
+  onExcluido,
 }: {
   profissional: ProfissionalComServicos;
   servicos: Servico[];
   onSalvo: () => void;
+  onExcluido: () => void;
 }) {
   const [nome, setNome] = useState(profissional.nome);
   const [telefoneContato, setTelefoneContato] = useState(profissional.telefone_contato ?? '');
@@ -120,6 +122,29 @@ function FormularioProfissional({
         body: JSON.stringify({ ativo: !profissional.ativo }),
       });
       onSalvo();
+    } catch (error) {
+      setErro(error instanceof ApiError ? error.message : 'Erro inesperado');
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function excluir() {
+    if (
+      !confirm(
+        `Excluir "${profissional.nome}" definitivamente? Essa ação só é permitida quando o profissional não possui agendamentos e não pode ser desfeita.`,
+      )
+    ) {
+      return;
+    }
+
+    setErro(null);
+    setSalvando(true);
+    try {
+      await apiFetch(`/api/profissionais/${profissional.id}`, {
+        method: 'DELETE',
+      });
+      onExcluido();
     } catch (error) {
       setErro(error instanceof ApiError ? error.message : 'Erro inesperado');
     } finally {
@@ -175,18 +200,28 @@ function FormularioProfissional({
 
         {erro && <ErrorState mensagem={erro} />}
 
-        <div className="mt-2 flex items-center justify-between">
+        <div className="mt-2 flex items-center justify-between gap-3">
           <Button type="submit" disabled={salvando}>
             Salvar
           </Button>
-          <button
-            type="button"
-            onClick={alternarAtivo}
-            disabled={salvando}
-            className="text-xs text-gray-500 hover:underline disabled:opacity-50 dark:text-gray-400"
-          >
-            {profissional.ativo ? 'Desativar' : 'Reativar'}
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={alternarAtivo}
+              disabled={salvando}
+              className="text-xs text-gray-500 hover:underline disabled:opacity-50 dark:text-gray-400"
+            >
+              {profissional.ativo ? 'Desativar' : 'Reativar'}
+            </button>
+            <button
+              type="button"
+              onClick={excluir}
+              disabled={salvando}
+              className="text-xs text-red-600 hover:underline disabled:opacity-50 dark:text-red-400"
+            >
+              Excluir
+            </button>
+          </div>
         </div>
       </form>
     </Card>
@@ -197,10 +232,12 @@ function DetalheProfissional({
   profissionalId,
   servicos,
   onSalvo,
+  onExcluido,
 }: {
   profissionalId: number;
   servicos: Servico[];
   onSalvo: () => void;
+  onExcluido: () => void;
 }) {
   const detalheEstado = useApiPolling<ProfissionalComServicos>(
     `/api/profissionais/${profissionalId}`,
@@ -220,6 +257,7 @@ function DetalheProfissional({
       profissional={detalheEstado.dados}
       servicos={servicos}
       onSalvo={onSalvo}
+      onExcluido={onExcluido}
     />
   );
 }
@@ -390,6 +428,10 @@ export default function ProfissionaisPage() {
                   profissionalId={selecionadoId}
                   servicos={servicos}
                   onSalvo={forcarAtualizacao}
+                  onExcluido={() => {
+                    setSelecionadoId(null);
+                    forcarAtualizacao();
+                  }}
                 />
               )}
             </div>

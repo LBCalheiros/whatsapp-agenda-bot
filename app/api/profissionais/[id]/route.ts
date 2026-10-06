@@ -6,6 +6,7 @@ import {
   atualizarProfissional,
   buscarProfissionalPorId,
   definirAtivoProfissional,
+  excluirProfissional,
   listarServicoIdsDoProfissional,
 } from '@/models/profissional';
 import { z } from 'zod';
@@ -73,3 +74,26 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return Response.json({ error: 'Erro interno' }, { status: 500 });
   }
 }
+
+export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const sessao = await obterSessaoAtual();
+  if (!sessao) {
+    return Response.json({ error: 'Não autenticado' }, { status: 401 });
+  }
+  if (sessao.role !== 'gerente') {
+    return Response.json({ error: 'Só gerentes podem excluir profissionais' }, { status: 403 });
+  }
+
+  try {
+    const { id } = await params;
+    await excluirProfissional(Number(id));
+    return Response.json({ ok: true });
+  } catch (error) {
+    if (error instanceof AppError) {
+      return Response.json({ error: error.message }, { status: error.statusCode });
+    }
+    logger.error({ error }, 'Erro inesperado');
+    return Response.json({ error: 'Erro interno' }, { status: 500 });
+  }
+}
+

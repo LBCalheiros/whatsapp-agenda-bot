@@ -1,5 +1,6 @@
 import { pool, withTransaction } from '@/infra/database';
 import { AppError } from '@/infra/errors';
+import { comLockDeProfissional } from '@/infra/lockProfissional';
 
 export type Profissional = {
   id: number;
@@ -153,6 +154,36 @@ export async function definirAtivoProfissional(id: number, ativo: boolean) {
     throw new AppError('Profissional não encontrado', 404);
   }
   return rows[0] as Profissional;
+}
+
+export async function excluirProfissional(id: number): Promise<void> {
+  await comLockDeProfissional(id, async () => {
+    const profissional = await buscarProfissionalPorId(id);
+
+    if (profissional.ativo) {
+      const restantes = await contarProfissionaisAtivos(id);
+      if (restantes === 0) {
+        throw new AppError('Precisa existir pelo menos um profissional ativo');
+      }
+    }
+
+    const { rows: agendamentos } = await pool.query(
+      `SELECT 1
+       FROM agendamentos
+       WHERE profissional_id = $1
+       LIMIT 1`,
+      [id],
+    );
+
+    if (agendamentos.length > 0) {
+      throw new AppError(
+        'Não é possível excluir um profissional que possui agendamentos. Desative-o para preservar o histórico.',
+        409,
+      );
+    }
+
+    await pool.query(`DELETE FROM profissionais WHERE id = $1`, [id]);
+  });
 }
 
 export async function buscarAntecedenciaMinima(profissionalId: number): Promise<number> {

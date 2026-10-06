@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "postgres": "docker compose -f infra/compose.yaml exec postgres psql -U postgres",
     "dev": "npm run services:up && next dev",
     "services:up": "docker compose -f infra/compose.yaml up -d",
     "services:stop": "docker compose -f infra/compose.yaml stop",
@@ -19,7 +20,9 @@
     "admin:resetar-senha": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\"}' node -r ts-node/register -r tsconfig-paths/register scripts/resetar-senha.ts",
     "admin:excluir": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\"}' node -r ts-node/register -r tsconfig-paths/register scripts/excluir-admin.ts",
     "admin:numero": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\"}' node -r ts-node/register -r tsconfig-paths/register scripts/atualizar-telefone.ts",
-    "admin:listar": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\"}' node -r ts-node/register -r tsconfig-paths/register scripts/listar-admins.ts"
+    "admin:listar": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\"}' node -r ts-node/register -r tsconfig-paths/register scripts/listar-admins.ts",
+    "agendamentos:listar": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\"}' node -r ts-node/register -r tsconfig-paths/register scripts/proximo-slot-servico.ts",
+    "agendamentos:criar": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\"}' node -r ts-node/register -r tsconfig-paths/register scripts/debug-confirmacao.ts"
   },
   "dependencies": {
     "next": "16.3.4",
@@ -37,6 +40,7 @@
     "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "cross-env": "^10.1.0",
     "dotenv": "^17.4.2",
     "dotenv-expand": "^1000.0.0",
     "eslint": "^9",

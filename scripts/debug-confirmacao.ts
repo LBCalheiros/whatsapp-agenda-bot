@@ -8,8 +8,8 @@ import { criarAgendamento } from '../models/agendamento';
 import { buscarOuCriarClientePorTelefone } from '../models/cliente';
 
 async function main() {
-  const servicoId = 1;
-  const dataHora = new Date('2026-10-06T14:00:00.000Z');
+  const servicoId = 4; // alterar de acordo com o ID
+  const dataHora = new Date('2050-10-06T14:00:00.000Z');
 
   const { rows: servicos } = await pool.query(
     `SELECT duracao_minutos FROM servicos WHERE id = $1`,
