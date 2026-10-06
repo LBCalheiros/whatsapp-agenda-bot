@@ -3,6 +3,7 @@ import { AppError } from '@/infra/errors';
 import { fimDoDiaBRT, inicioDoDiaBRT } from '@/infra/data';
 import { obterProfissionalDisponivel, validarHorarioDisponivel } from '@/models/disponibilidade';
 import { buscarAntecedenciaMinima, profissionalAtendeServico } from '@/models/profissional';
+import { comLockDeProfissional } from '@/infra/lockProfissional';
 
 type Agendamento = {
   id: number;
@@ -26,48 +27,52 @@ export async function criarAgendamento(input: {
 }) {
   const { clienteId, profissionalId, servicoId, dataHora } = input;
 
-  const atende = await profissionalAtendeServico(profissionalId, servicoId);
-  if (!atende) {
-    throw new AppError('Esse profissional não atende esse serviço');
-  }
-
-  const antecedenciaMinimaHoras = await buscarAntecedenciaMinima(profissionalId);
-  const horasAteAgendamento = (dataHora.getTime() - Date.now()) / (1000 * 60 * 60);
-  if (horasAteAgendamento < antecedenciaMinimaHoras) {
-    throw new AppError(
-      `Agendamentos precisam ser feitos com pelo menos ${antecedenciaMinimaHoras}h de antecedência`,
-    );
-  }
-
-  const { rows: servicos } = await pool.query(
-    `SELECT duracao_minutos FROM servicos WHERE id = $1 AND ativo = true`,
-    [servicoId],
-  );
-  if (servicos.length === 0) {
-    throw new AppError('Serviço não encontrado ou inativo');
-  }
-  const duracaoMinutos = servicos[0].duracao_minutos;
-
-  await validarHorarioDisponivel(profissionalId, dataHora, duracaoMinutos);
-
-  function ehViolacaoDeConstraintUnica(error: unknown): error is { code: string } {
-    return typeof error === 'object' && error !== null && 'code' in error;
-  }
-
-  try {
-    const { rows } = await pool.query(
-      `INSERT INTO agendamentos (cliente_id, profissional_id, servico_id, data_hora)
-       VALUES ($1, $2, $3, $4)
-       RETURNING *`,
-      [clienteId, profissionalId, servicoId, dataHora],
-    );
-    return rows[0] as Agendamento;
-  } catch (error) {
-    if (ehViolacaoDeConstraintUnica(error) && error.code === '23505') {
-      throw new AppError('Esse horário acabou de ser ocupado, escolha outro');
+  return comLockDeProfissional(profissionalId, async () => {
+    const atende = await profissionalAtendeServico(profissionalId, servicoId);
+    if (!atende) {
+      throw new AppError('Esse profissional não atende esse serviço');
     }
-    throw error;
-  }
+
+    const antecedenciaMinimaHoras = await buscarAntecedenciaMinima(profissionalId);
+    const horasAteAgendamento = (dataHora.getTime() - Date.now()) / (1000 * 60 * 60);
+    if (horasAteAgendamento < antecedenciaMinimaHoras) {
+      throw new AppError(
+        `Agendamentos precisam ser feitos com pelo menos ${antecedenciaMinimaHoras}h de antecedência`,
+      );
+    }
+
+    const { rows: servicos } = await pool.query(
+      `SELECT duracao_minutos FROM servicos WHERE id = $1 AND ativo = true`,
+      [servicoId],
+    );
+    if (servicos.length === 0) {
+      throw new AppError('Serviço não encontrado ou inativo');
+    }
+
+    const duracaoMinutos = servicos[0].duracao_minutos;
+
+    await validarHorarioDisponivel(profissionalId, dataHora, duracaoMinutos);
+
+    function ehViolacaoDeConstraintUnica(error: unknown): error is { code: string } {
+      return typeof error === 'object' && error !== null && 'code' in error;
+    }
+
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO agendamentos (cliente_id, profissional_id, servico_id, data_hora)
+         VALUES ($1, $2, $3, $4)
+         RETURNING *`,
+        [clienteId, profissionalId, servicoId, dataHora],
+      );
+
+      return rows[0] as Agendamento;
+    } catch (error) {
+      if (ehViolacaoDeConstraintUnica(error) && error.code === '23505') {
+        throw new AppError('Esse horário acabou de ser ocupado, escolha outro');
+      }
+      throw error;
+    }
+  });
 }
 
 export async function listarAgendamentos(filtros: {
