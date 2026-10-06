@@ -6,7 +6,7 @@ import { AppError } from '@/infra/errors';
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const sessao = await obterSessaoAtual();
   if (!sessao) {
-    return NextResponse.json({ erro: 'Não autenticado' }, { status: 401 });
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
   }
 
   const { id } = await params;
@@ -16,7 +16,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     return NextResponse.json(atendimento);
   } catch (error) {
     if (error instanceof AppError) {
-      return NextResponse.json({ erro: error.message }, { status: error.statusCode });
+      return NextResponse.json({ error: error.message }, { status: error.statusCode });
     }
     throw error;
   }

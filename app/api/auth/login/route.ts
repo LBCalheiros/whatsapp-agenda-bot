@@ -19,14 +19,14 @@ export async function POST(request: Request) {
     ({ email, senha } = validar(schemaLogin, body));
   } catch (error) {
     if (error instanceof AppError) {
-      return NextResponse.json({ erro: error.message }, { status: error.statusCode });
+      return NextResponse.json({ error: error.message }, { status: error.statusCode });
     }
     throw error;
   }
 
   const usuario = await autenticar(email, senha);
   if (!usuario) {
-    return NextResponse.json({ erro: 'Credenciais inválidas' }, { status: 401 });
+    return NextResponse.json({ error: 'Credenciais inválidas' }, { status: 401 });
   }
 
   const token = criarTokenSessao(usuario.id, usuario.role, usuario.versao_token);

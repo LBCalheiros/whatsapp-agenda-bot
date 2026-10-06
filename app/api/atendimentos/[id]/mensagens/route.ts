@@ -14,7 +14,7 @@ const schemaEnviarMensagem = z.object({
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const sessao = await obterSessaoAtual();
   if (!sessao) {
-    return NextResponse.json({ erro: 'Não autenticado' }, { status: 401 });
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
   }
 
   const { id } = await params;
@@ -25,7 +25,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const sessao = await obterSessaoAtual();
   if (!sessao) {
-    return NextResponse.json({ erro: 'Não autenticado' }, { status: 401 });
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
   }
 
   const { id } = await params;
@@ -55,7 +55,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json(mensagem);
   } catch (error) {
     if (error instanceof AppError) {
-      return NextResponse.json({ erro: error.message }, { status: error.statusCode });
+      return NextResponse.json({ error: error.message }, { status: error.statusCode });
     }
     throw error;
   }

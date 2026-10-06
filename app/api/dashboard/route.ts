@@ -10,7 +10,7 @@ const LIMITE_PROXIMOS_AGENDAMENTOS = 5;
 export async function GET() {
   const sessao = await obterSessaoAtual();
   if (!sessao) {
-    return NextResponse.json({ erro: 'Não autenticado' }, { status: 401 });
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
   }
 
   try {
@@ -41,7 +41,7 @@ export async function GET() {
     });
   } catch (error) {
     if (error instanceof AppError) {
-      return NextResponse.json({ erro: error.message }, { status: error.statusCode });
+      return NextResponse.json({ error: error.message }, { status: error.statusCode });
     }
     throw error;
   }

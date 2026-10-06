@@ -6,7 +6,7 @@ import { AppError } from '@/infra/errors';
 export async function GET(request: Request) {
   const sessao = await obterSessaoAtual();
   if (!sessao) {
-    return NextResponse.json({ erro: 'Não autenticado' }, { status: 401 });
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
   }
 
   const { searchParams } = new URL(request.url);
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     return NextResponse.json(atendimentos);
   } catch (error) {
     if (error instanceof AppError) {
-      return NextResponse.json({ erro: error.message }, { status: error.statusCode });
+      return NextResponse.json({ error: error.message }, { status: error.statusCode });
     }
     throw error;
   }

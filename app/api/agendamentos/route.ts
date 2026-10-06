@@ -29,6 +29,13 @@ function schemaData() {
     .optional();
 }
 
+function schemaBooleanQuery() {
+  return z
+    .enum(['true', 'false'])
+    .transform((valor) => valor === 'true')
+    .optional();
+}
+
 const schemaListarAgendamentos = z.object({
   profissionalId: z.coerce.number().int().positive().optional(),
   servicoId: z.coerce.number().int().positive().optional(),
@@ -36,8 +43,8 @@ const schemaListarAgendamentos = z.object({
   dataInicio: schemaData(),
   dataFim: schemaData(),
   status: z.enum(STATUS_AGENDAMENTO).optional(),
-  apenasFuturos: z.coerce.boolean().optional(),
-  historico: z.coerce.boolean().optional(),
+  apenasFuturos: schemaBooleanQuery(),
+  historico: schemaBooleanQuery(),
 });
 
 const schemaCriarAgendamento = z.object({
