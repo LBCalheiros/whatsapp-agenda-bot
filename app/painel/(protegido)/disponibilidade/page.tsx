@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, FormEvent } from 'react';
+import { useState, FormEvent } from 'react';
 import { useApiPolling } from '@/hooks/useApiPolling';
 import { apiFetch, ApiError } from '@/lib/apiClient';
 import { Button } from '@/components/ui/Button';
@@ -171,7 +171,7 @@ function LinhaDia({
       {regra ? (
         <span className="flex-1 text-sm text-gray-600 dark:text-gray-400">
           {regra.horario_inicio.slice(0, 5)} às {regra.horario_fim.slice(0, 5)} ·{' '}
-          {regra.intervalo_minutos}min por consulta
+          {regra.intervalo_minutos} min entre consultas
         </span>
       ) : (
         <span className="flex-1 text-sm text-gray-400 dark:text-gray-500">Fechado</span>
@@ -213,13 +213,6 @@ function SecaoAntecedenciaMinima({
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [salvo, setSalvo] = useState(false);
-
-  // zera o rascunho sempre que trocar de profissional, senão o valor do
-  // anterior fica preso na tela até o usuário mexer de novo
-  useEffect(() => {
-    setHoras(null);
-    setSalvo(false);
-  }, [profissionalId]);
 
   const valorAtual =
     horas ?? (configEstado.status === 'sucesso' ? configEstado.dados.antecedenciaMinimaHoras : 2);
@@ -274,8 +267,8 @@ function SecaoAntecedenciaMinima({
       {salvo && <span className="text-xs text-gray-400 dark:text-gray-500">Salvo.</span>}
       {erro && <ErrorState mensagem={erro} />}
       <p className="mt-1 w-full text-xs text-gray-400 dark:text-gray-500">
-        Vale pro fluxo do cliente pelo WhatsApp. Reagendamentos feitos por você no painel de
-        agenda não respeitam esse limite — você decide livremente qualquer horário.
+        Vale pro fluxo do cliente pelo WhatsApp. Reagendamentos feitos por você no painel de agenda
+        não respeitam esse limite — você decide livremente qualquer horário.
       </p>
     </form>
   );
@@ -424,7 +417,11 @@ export default function DisponibilidadePage() {
         <h2 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
           Antecedência mínima
         </h2>
-        <SecaoAntecedenciaMinima profissionalId={profissionalSelecionadoId} refreshKey={refreshKey} />
+        <SecaoAntecedenciaMinima
+          key={profissionalSelecionadoId ?? 'padrao'}
+          profissionalId={profissionalSelecionadoId}
+          refreshKey={refreshKey}
+        />
       </Card>
 
       <Card>

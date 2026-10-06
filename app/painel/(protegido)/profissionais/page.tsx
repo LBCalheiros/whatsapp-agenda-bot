@@ -152,7 +152,11 @@ function FormularioProfissional({
           />
         </label>
 
-        <ListaServicosCheckbox servicos={servicos} selecionados={servicoIds} onMudar={setServicoIds} />
+        <ListaServicosCheckbox
+          servicos={servicos}
+          selecionados={servicoIds}
+          onMudar={setServicoIds}
+        />
 
         <p className="text-xs text-gray-400 dark:text-gray-500">
           Dias de atendimento, horários, bloqueios e antecedência mínima ficam em{' '}
@@ -279,7 +283,11 @@ function FormularioNovoProfissional({
           className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
         />
 
-        <ListaServicosCheckbox servicos={servicos} selecionados={servicoIds} onMudar={setServicoIds} />
+        <ListaServicosCheckbox
+          servicos={servicos}
+          selecionados={servicoIds}
+          onMudar={setServicoIds}
+        />
 
         {erro && <ErrorState mensagem={erro} />}
 

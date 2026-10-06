@@ -103,7 +103,8 @@ function SecaoReceita() {
 
   const { dataInicio, dataFim } = useMemo(() => {
     if (periodo === 'tudo') return { dataInicio: '', dataFim: '' };
-    if (periodo === 'personalizado') return { dataInicio: dataInicioCustom, dataFim: dataFimCustom };
+    if (periodo === 'personalizado')
+      return { dataInicio: dataInicioCustom, dataFim: dataFimCustom };
     if (periodo === 'hoje') {
       const hojeStr = paraDataYYYYMMDD(new Date());
       return { dataInicio: hojeStr, dataFim: hojeStr };
@@ -598,7 +599,7 @@ export default function AgendaPage() {
                     </Button>
                   </form>
                   <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                    Sem checagem de disponibilidade — qualquer horário é aceito.
+                    Sem checagem de disponibilidade, qualquer horário é aceito.
                   </p>
                 </div>
 
@@ -639,8 +640,8 @@ export default function AgendaPage() {
                   {selecionado.observacoes || 'Nenhuma observação registrada.'}
                 </p>
                 <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
-                  Agendamentos do histórico não podem ser reagendados ou ter observações editadas
-                  — use a aba &quot;Próximos&quot; pra agendamentos futuros.
+                  Agendamentos do histórico não podem ser reagendados ou ter observações editadas —
+                  use a aba &quot;Próximos&quot; pra agendamentos futuros.
                 </p>
               </div>
             )}

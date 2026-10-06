@@ -113,7 +113,11 @@ export async function atualizarProfissional(
   const { rows } = await pool.query(
     `UPDATE profissionais SET nome = $1, telefone_contato = $2 WHERE id = $3
      RETURNING id, nome, telefone_contato, ativo, antecedencia_minima_horas`,
-    [nome, dados.telefoneContato !== undefined ? dados.telefoneContato : atual.telefone_contato, id],
+    [
+      nome,
+      dados.telefoneContato !== undefined ? dados.telefoneContato : atual.telefone_contato,
+      id,
+    ],
   );
 
   if (dados.servicoIds !== undefined) {

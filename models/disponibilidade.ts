@@ -9,6 +9,7 @@ type RegraDisponibilidade = {
   horario_inicio: string;
   horario_fim: string;
   intervalo_minutos: number;
+  antecedencia_minima_horas: number;
 };
 
 function validarRegra(horarioInicio: string, horarioFim: string, intervaloMinutos: number) {
@@ -150,7 +151,10 @@ export async function consultarHorariosDisponiveis(
   const diaSemana = dataLocal.getUTCDay();
 
   const { rows: regras } = await pool.query(
-    `SELECT * FROM regras_disponibilidade WHERE profissional_id = $1 AND dia_semana = $2`,
+    `SELECT r.*, p.antecedencia_minima_horas
+   FROM regras_disponibilidade r
+   JOIN profissionais p ON p.id = r.profissional_id
+   WHERE r.profissional_id = $1 AND r.dia_semana = $2`,
     [profissionalId, diaSemana],
   );
 
@@ -174,6 +178,9 @@ export async function consultarHorariosDisponiveis(
     candidatos.push(new Date(cursor));
     cursor = new Date(cursor.getTime() + regra.intervalo_minutos * 60_000);
   }
+
+  const antecedenciaMinimaMs = regra.antecedencia_minima_horas * 60 * 60 * 1000;
+  const agora = Date.now();
 
   const inicioDiaLocal = new Date(dataLocal);
   inicioDiaLocal.setUTCHours(0, 0, 0, 0);
@@ -204,6 +211,8 @@ export async function consultarHorariosDisponiveis(
   );
 
   return candidatos.filter((slot) => {
+    if (slot.getTime() - agora < antecedenciaMinimaMs) return false;
+
     const slotFim = new Date(slot.getTime() + duracaoMinutos * 60_000);
 
     const conflitaAgendamento = faixasOcupadas.some((f) => slot < f.fim && slotFim > f.inicio);
@@ -216,10 +225,6 @@ export async function consultarHorariosDisponiveis(
   });
 }
 
-// Pro fluxo do bot com múltiplos profissionais: em vez de calcular horários
-// livres pra um profissional específico, calcula a UNIÃO dos horários livres
-// de todos os profissionais que atendem aquele serviço — o cliente escolhe o
-// horário sem saber (nem precisar saber) qual profissional vai atender.
 export async function consultarHorariosDisponiveisParaServico(
   servicoId: number,
   data: Date,

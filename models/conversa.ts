@@ -9,7 +9,6 @@ import {
   obterProfissionalDisponivel,
 } from '@/models/disponibilidade';
 import {
-  ANTECEDENCIA_MINIMA_HORAS,
   criarAgendamento,
   cancelarComoCliente,
   reagendarAgendamento,
@@ -252,7 +251,6 @@ async function listarServicosAtivos(): Promise<
 // decide quem atende na hora de confirmar.
 async function buscarProximosHorarios(servicoId: number, duracaoMinutos: number): Promise<Date[]> {
   const agora = Date.now();
-  const antecedenciaMinimaMs = ANTECEDENCIA_MINIMA_HORAS * 60 * 60 * 1000;
   const encontrados: Date[] = [];
 
   for (let i = 0; i < DIAS_BUSCA_HORARIOS && encontrados.length < MAX_HORARIOS_EXIBIDOS; i++) {
@@ -261,9 +259,7 @@ async function buscarProximosHorarios(servicoId: number, duracaoMinutos: number)
 
     for (const horario of horarios) {
       if (encontrados.length >= MAX_HORARIOS_EXIBIDOS) break;
-      if (horario.getTime() - agora >= antecedenciaMinimaMs) {
-        encontrados.push(horario);
-      }
+      encontrados.push(horario);
     }
   }
 
@@ -544,10 +540,7 @@ async function processarEscolhaAgendamento(
 
   if (!agendamentoIds.includes(agendamentoId)) {
     // proteção contra id fora da lista que foi oferecida (payload adulterado ou conversa velha)
-    await enviarMensagemTexto(
-      telefone,
-      'Esse agendamento não está mais disponível por aqui.',
-    );
+    await enviarMensagemTexto(telefone, 'Esse agendamento não está mais disponível por aqui.');
     await atualizarEstado(telefone, 'menu');
     await enviarMenu(telefone);
     return;
