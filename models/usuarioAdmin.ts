@@ -164,9 +164,6 @@ export async function atualizarPerfilProprio(
   }
 }
 
-// Edição feita por um gerente sobre qualquer funcionário (incluindo ele mesmo,
-// pros campos de contato) — email, telefone, senha, papel, profissional vinculado.
-// idDoGerenteLogado é usado só pra bloquear autorrebaixamento.
 export async function atualizarFuncionarioComoGerente(
   id: number,
   idDoGerenteLogado: number,
@@ -191,6 +188,7 @@ export async function atualizarFuncionarioComoGerente(
 
   const campos: string[] = [];
   const valores: unknown[] = [];
+  let precisaInvalidarToken = false;
 
   if (dados.email !== undefined) {
     valores.push(dados.email);
@@ -200,19 +198,25 @@ export async function atualizarFuncionarioComoGerente(
     valores.push(dados.telefoneNotificacao);
     campos.push(`telefone_notificacao = $${valores.length}`);
   }
+
   if (dados.novaSenha !== undefined) {
     valores.push(gerarHashSenha(dados.novaSenha));
     campos.push(`senha_hash = $${valores.length}`);
-    campos.push(`versao_token = versao_token + 1`);
+    precisaInvalidarToken = true;
   }
+
   if (dados.role !== undefined) {
     valores.push(dados.role);
     campos.push(`role = $${valores.length}`);
-    campos.push(`versao_token = versao_token + 1`); // papel mudou, força relogar
+    precisaInvalidarToken = true;
   }
   if (dados.profissionalId !== undefined) {
     valores.push(dados.profissionalId);
     campos.push(`profissional_id = $${valores.length}`);
+  }
+
+  if (precisaInvalidarToken) {
+    campos.push(`versao_token = versao_token + 1`);
   }
 
   if (campos.length === 0) {

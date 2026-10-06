@@ -15,6 +15,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return Response.json({ error: 'Não autenticado' }, { status: 401 });
   }
 
+  if (sessao.role !== 'gerente') {
+    return Response.json(
+      { error: 'Só gerentes podem reagendar agendamentos pelo painel' },
+      { status: 403 },
+    );
+  }
+
   try {
     const { id } = await params;
     const body = await request.json();
