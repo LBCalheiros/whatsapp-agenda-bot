@@ -1,94 +1,329 @@
 # WhatsApp Agenda Bot
 
-Bot de WhatsApp para agendamento de serviços. O projeto recebe mensagens pela WhatsApp Cloud API, mantém o estado da conversa no PostgreSQL e permite consultar horários, confirmar agendamentos e cancelar compromissos dentro das regras definidas.
+Sistema de agendamento de serviços integrado à WhatsApp Cloud API, com atendimento conversacional pelo WhatsApp e painel administrativo para gestão da agenda.
 
-> Projeto pessoal/em desenvolvimento, voltado a estudo. Ainda não está preparado para produção.
+O projeto foi desenvolvido como estudo prático de backend, banco de dados, integração com API externa, concorrência e construção de uma interface administrativa.
 
-## Funcionalidades atuais
+## Funcionalidades
 
-- Verificação e recebimento de webhooks da WhatsApp Cloud API.
-- Menu conversacional com estado persistido por telefone.
-- Consulta de horários, confirmação e criação de agendamentos.
-- Consulta e cancelamento de agendamentos futuros.
-- Mensagens de texto, botões interativos e templates pela Cloud API.
+### Atendimento pelo WhatsApp
 
-Neste MVP, o fluxo de agendamento usa o primeiro profissional e o primeiro serviço ativos cadastrados. O cliente que possui mais de um agendamento futuro é direcionado ao atendimento para cancelamento.
+- Recebimento e validação de webhooks da WhatsApp Cloud API.
+- Menu conversacional com estado persistido no PostgreSQL.
+- Agendamento de serviços com escolha de horário.
+- Confirmação de agendamento por mensagem interativa.
+- Consulta e cancelamento de agendamentos.
+- Fluxo para falar com um atendente.
+- Mensagens de texto, botões interativos e templates.
+- Proteção contra processamento duplicado de mensagens da Meta.
+- Retry automático para falhas temporárias da API do WhatsApp.
+
+### Painel administrativo
+
+O painel protegido permite gerenciar:
+
+- Agenda e agendamentos.
+- Profissionais.
+- Serviços.
+- Funcionários e permissões.
+- Regras de disponibilidade.
+- Bloqueios de horários.
+- Atendimentos humanos.
+- Observações dos agendamentos.
+- Receita por período.
+- Configurações de antecedência mínima.
+
+O sistema suporta múltiplos profissionais e permite definir quais serviços cada profissional atende.
+
+### Regras de agendamento
+
+- Antecedência mínima configurável por profissional.
+- Controle de expediente e intervalos entre horários.
+- Bloqueios de disponibilidade.
+- Prevenção de conflitos por sobreposição de horários.
+- Apenas agendamentos `agendado` e `confirmado` ocupam horários.
+- Agendamentos `completo`, `cancelado` e `nao_compareceu` liberam o horário.
+- Cancelamento pelo cliente com antecedência mínima de 24 horas.
+- Reagendamento administrativo sem aplicar a antecedência mínima do cliente.
+- Conclusão automática de agendamentos depois do término do serviço.
+- Histórico das alterações de status e reagendamentos.
+
+### Consistência e concorrência
+
+O projeto utiliza recursos do PostgreSQL para lidar com concorrência de forma segura:
+
+- Advisory locks por profissional para serializar operações de agenda.
+- Advisory locks por agendamento para operações concorrentes sobre o mesmo registro.
+- Advisory locks por conversa para evitar processamento simultâneo de mensagens do mesmo telefone.
+- Constraint e índice único para impedir duplicidade de horário entre agendamentos ativos.
+- Idempotência para mensagens recebidas da Meta.
+- Snapshot de duração e preço no momento da criação do agendamento, evitando que alterações posteriores no serviço modifiquem o histórico.
 
 ## Stack
 
-- Next.js 16 (App Router) e TypeScript
-- PostgreSQL 16, `pg` e `node-pg-migrate`
+- Next.js 16 com App Router
+- TypeScript
+- React
+- PostgreSQL 16
+- `pg`
+- `node-pg-migrate`
 - WhatsApp Cloud API
-- Pino para logs
-- Jest e `ts-jest` para testes unitários
-- Docker Compose para o banco local
+- Zod
+- Pino
+- Jest e `ts-jest`
+- Docker Compose
+- Tailwind CSS
 
 ## Arquitetura
 
 ```text
-app/api/          Adaptadores HTTP: webhook, agendamentos e cron
-models/           Regras de domínio: conversa, agenda, disponibilidade e cliente
-infra/            Banco, migrations, logs e cliente da WhatsApp Cloud API
-tests/            Testes unitários
+WhatsApp / Painel
+       |
+       v
+   app/api/
+   Camada HTTP
+       |
+       v
+    models/
+  Regras de domínio
+       |
+       v
+    infra/
+Banco, autenticação,
+locks, integração WhatsApp
+       |
+       v
+  PostgreSQL
 ```
 
-O webhook apenas interpreta o evento recebido e delega o processamento para `models/conversa.ts`. As regras de disponibilidade e agendamento permanecem fora da camada HTTP, permitindo reutilizá-las pelo bot e por futuras interfaces administrativas.
-
-## Fluxo de conversa
+Principais responsabilidades:
 
 ```text
-Mensagem do cliente
-  -> webhook
-  -> conversa persistida no PostgreSQL
-  -> menu
-       -> agendar -> escolher horário -> confirmar -> criar agendamento
-       -> ver agendamentos -> cancelar, quando permitido
-       -> falar com atendente
+app/api/       Rotas HTTP, autenticação e adaptação das requisições
+app/painel/    Interface administrativa
+models/        Regras de negócio e acesso aos dados do domínio
+infra/         Banco, migrations, sessões, locks, logs e WhatsApp
+lib/           Utilitários usados pelo frontend
+hooks/         Hooks para consumo e atualização das APIs
+tests/         Testes automatizados
 ```
 
-O estado e o contexto da conversa são armazenados na tabela `conversas`. Isso evita depender da memória do processo do Next.js entre eventos de webhook.
+O webhook recebe o evento da Meta e delega o processamento para a camada de domínio. O estado da conversa é persistido no PostgreSQL, evitando dependência da memória de uma instância específica do Next.js.
+
+## Fluxo de agendamento
+
+```text
+Cliente
+  |
+  v
+WhatsApp
+  |
+  v
+Webhook
+  |
+  v
+Conversa persistida
+  |
+  +--> Agendar
+  |      |
+  |      +--> Escolher serviço
+  |      +--> Consultar horários
+  |      +--> Escolher horário
+  |      +--> Confirmar
+  |      +--> Criar agendamento
+  |
+  +--> Ver agendamentos
+  |
+  +--> Falar com atendente
+```
+
+## Banco de dados
+
+O PostgreSQL armazena, entre outros dados:
+
+- clientes
+- profissionais
+- serviços
+- relação entre profissionais e serviços
+- regras de disponibilidade
+- indisponibilidades
+- agendamentos
+- histórico de agendamentos
+- conversas
+- atendimentos humanos
+- mensagens de atendimento
+- usuários administrativos
+- mensagens do WhatsApp já processadas
+
+A relação `profissional_servicos` permite que um serviço seja oferecido por vários profissionais e que cada profissional tenha seu próprio conjunto de serviços.
+
+## Autenticação e autorização
+
+O painel utiliza sessão assinada por HMAC armazenada em cookie.
+
+A sessão contém a versão do token do usuário. Alterações sensíveis, como senha ou papel, podem invalidar sessões anteriores por meio dessa versão.
+
+Existem dois papéis:
+
+- `gerente`: acesso administrativo completo.
+- `funcionario`: acesso limitado ao próprio perfil e ao profissional ao qual está vinculado.
+
+As rotas administrativas verificam a sessão e, quando aplicável, o profissional autorizado antes de acessar ou alterar dados.
+
+## Jobs automáticos
+
+Existem rotas protegidas por `CRON_SECRET` para tarefas automáticas:
+
+```text
+/api/cron/lembretes
+/api/cron/manutencao
+```
+
+O cron de lembretes procura agendamentos que precisam receber o lembrete e evita envio duplicado.
+
+O cron de manutenção conclui automaticamente agendamentos cujo horário já terminou, usando a duração armazenada como snapshot no próprio agendamento.
+
+Em produção, essas rotas podem ser executadas por um scheduler externo, como o Vercel Cron configurado no projeto.
 
 ## Configuração local
 
+### Pré-requisitos
+
+- Node.js
+- Docker
+- Conta/configuração da WhatsApp Cloud API para uso da integração real
+
+### Instalação
+
 ```bash
 npm install
+```
+
+Crie o arquivo de ambiente:
+
+```bash
 cp .env.example .env.development
+```
+
+Preencha as variáveis necessárias:
+
+```env
+DATABASE_URL=
+
+WHATSAPP_TOKEN=
+WHATSAPP_PHONE_NUMBER_ID=
+WHATSAPP_BUSINESS_ACCOUNT_ID=
+WHATSAPP_VERIFY_TOKEN=
+WHATSAPP_APP_SECRET=
+
+CRON_SECRET=
+AUTH_SECRET=
+```
+
+Suba o PostgreSQL:
+
+```bash
 npm run services:up
+```
+
+Execute as migrations:
+
+```bash
 npm run migration:up
+```
+
+Inicie a aplicação:
+
+```bash
 npm run dev
 ```
 
-Copie `.env.example` para `.env.development` e configure as credenciais do banco e da Meta. O arquivo de produção está no `.gitignore`, mas cuidado para ele não ser versionado.
-
-## Webhook da Meta
-
-O endpoint de webhook é:
+Por padrão, a aplicação local fica disponível em:
 
 ```text
-GET/POST /api/webhook
+http://localhost:3000
 ```
 
-Para validar a assinatura inicial, a Meta chama o `GET` com `hub.mode`, `hub.verify_token` e `hub.challenge`. O valor de `WHATSAPP_VERIFY_TOKEN` precisa ser igual ao token configurado no painel da Meta.
+O painel administrativo fica em:
 
-Para receber chamadas externas durante o desenvolvimento, a porta da aplicação deve ser pública. Em GitHub Codespaces, defina a visibilidade da porta `3000` como **Public** no painel **Ports**. Mantenha a porta do PostgreSQL (`5432`) como **Private**.
+```text
+/painel/login
+```
 
-Uma resposta de verificação bem-sucedida é `HTTP 200` com o conteúdo de `hub.challenge`. Um `HTTP 302` para login do GitHub indica que a porta ainda está privada.
+### Desenvolvimento com GitHub Codespaces
 
-Contas/números de teste da Meta podem reportar falha de entrega por restrição regional (por exemplo, código `130497`). Esse cenário é externo à lógica do bot; o fluxo ainda pode ser validado com eventos reais ou simulados.
+Para receber requisições externas durante testes de webhook, a porta `3000` precisa estar pública no Codespaces. A porta do PostgreSQL deve permanecer privada.
 
 ## Comandos
 
-| Comando                 | Descrição                            |
-| ----------------------- | ------------------------------------ |
-| `npm run dev`           | Inicia banco e aplicação localmente. |
-| `npm run migration:up`  | Executa migrations pendentes.        |
-| `npm test`              | Executa testes unitários.            |
-| `npm run lint:check`    | Verifica lint e formatação.          |
-| `npm run services:down` | Para e remove os serviços locais.    |
+| Comando                                              | Descrição                                                 |
+| ---------------------------------------------------- | --------------------------------------------------------- |
+| `npm run dev`                                        | Inicia o PostgreSQL e a aplicação em modo desenvolvimento |
+| `npm run services:up`                                | Sobe os serviços locais                                   |
+| `npm run services:down`                              | Para e remove os serviços locais                          |
+| `npm run migration:up`                               | Executa migrations pendentes                              |
+| `npm run migration:create -- <nome>`                 | Cria uma nova migration                                   |
+| `npm test`                                           | Executa toda a suíte de testes                            |
+| `npm run lint:check`                                 | Executa ESLint e verifica formatação                      |
+| `npm run lint:fix`                                   | Corrige lint e formatação                                 |
+| `npx tsc --noEmit`                                   | Verifica os tipos TypeScript                              |
+| `npm run build`                                      | Gera o build de produção                                  |
+| `npm run postgres`                                   | Abre o `psql` no PostgreSQL local                         |
+| `npm run admin:criar -- <email> <senha> [telefone]`  | Cria um usuário administrativo                            |
+| `npm run admin:resetar-senha -- <email> <novaSenha>` | Redefine a senha de um usuário                            |
+| `npm run admin:listar`                               | Lista usuários administrativos                            |
 
 ## Testes
 
-Os testes ficam em `tests/`. Eles usam ambiente Node.js, resolvem o alias `@/` e não devem escrever no banco de desenvolvimento.
+Os testes ficam em `tests/` e cobrem diferentes partes da aplicação, incluindo:
+
+- Regras de agendamento.
+- Concorrência e conflitos de horário.
+- Snapshot de duração e preço.
+- Conclusão automática.
+- CRUD de profissionais.
+- Autorização por profissional.
+- Sessões e autenticação.
+- Hash e verificação de senhas.
+- Assinatura do webhook.
+- Idempotência de mensagens do WhatsApp.
+- Retry da integração com a WhatsApp Cloud API.
+- Conversas concorrentes.
+
+A suíte atual conta com **57 testes automatizados**.
+
+Para executar apenas uma suíte:
+
+```bash
+npm test -- --runInBand tests/agendamento.test.ts
+```
+
+## Validação do projeto
+
+Antes de considerar uma alteração pronta, a validação completa pode ser executada com:
+
+```bash
+npm run lint:check
+npx tsc --noEmit
+npm test
+npm run build
+```
+
+## Status
+
+O projeto está em desenvolvimento e foi construído como projeto pessoal de estudo.
+
+A implementação atual está validada com:
+
+```text
+57 testes passando
+TypeScript sem erros
+ESLint sem erros
+Prettier validado
+Build de produção concluído
+```
+
+A integração real com a WhatsApp Cloud API depende da configuração das credenciais, webhook e recursos correspondentes na plataforma da Meta.
 
 ## Licença
 
