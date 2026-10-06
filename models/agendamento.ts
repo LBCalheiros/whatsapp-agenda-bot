@@ -4,6 +4,7 @@ import { fimDoDiaBRT, inicioDoDiaBRT } from '@/infra/data';
 import { obterProfissionalDisponivel, validarHorarioDisponivel } from '@/models/disponibilidade';
 import { buscarAntecedenciaMinima, profissionalAtendeServico } from '@/models/profissional';
 import { comLockDeProfissional } from '@/infra/lockProfissional';
+import { comLockDeAgendamento } from '@/infra/lockAgendamento';
 
 type Agendamento = {
   id: number;
@@ -21,6 +22,12 @@ type Agendamento = {
 export const ANTECEDENCIA_MINIMA_HORAS = 2;
 const DIAS_HISTORICO = 30;
 
+function ehViolacaoDeConstraintUnica(error: unknown): error is { code: string } {
+  return (
+    typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+  );
+}
+
 export async function criarAgendamento(input: {
   clienteId: number;
   profissionalId: number;
@@ -31,12 +38,15 @@ export async function criarAgendamento(input: {
 
   return comLockDeProfissional(profissionalId, async () => {
     const atende = await profissionalAtendeServico(profissionalId, servicoId);
+
     if (!atende) {
       throw new AppError('Esse profissional não atende esse serviço');
     }
 
     const antecedenciaMinimaHoras = await buscarAntecedenciaMinima(profissionalId);
+
     const horasAteAgendamento = (dataHora.getTime() - Date.now()) / (1000 * 60 * 60);
+
     if (horasAteAgendamento < antecedenciaMinimaHoras) {
       throw new AppError(
         `Agendamentos precisam ser feitos com pelo menos ${antecedenciaMinimaHoras}h de antecedência`,
@@ -45,10 +55,11 @@ export async function criarAgendamento(input: {
 
     const { rows: servicos } = await pool.query(
       `SELECT duracao_minutos, preco
-   FROM servicos
-   WHERE id = $1 AND ativo = true`,
+       FROM servicos
+       WHERE id = $1 AND ativo = true`,
       [servicoId],
     );
+
     if (servicos.length === 0) {
       throw new AppError('Serviço não encontrado ou inativo');
     }
@@ -58,16 +69,12 @@ export async function criarAgendamento(input: {
 
     await validarHorarioDisponivel(profissionalId, dataHora, duracaoMinutos);
 
-    function ehViolacaoDeConstraintUnica(error: unknown): error is { code: string } {
-      return typeof error === 'object' && error !== null && 'code' in error;
-    }
-
     try {
       const { rows } = await pool.query(
         `INSERT INTO agendamentos
-   (cliente_id, profissional_id, servico_id, data_hora, duracao_minutos, preco)
-   VALUES ($1, $2, $3, $4, $5, $6)
-   RETURNING *`,
+         (cliente_id, profissional_id, servico_id, data_hora, duracao_minutos, preco)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING *`,
         [clienteId, profissionalId, servicoId, dataHora, duracaoMinutos, preco],
       );
 
@@ -76,6 +83,7 @@ export async function criarAgendamento(input: {
       if (ehViolacaoDeConstraintUnica(error) && error.code === '23505') {
         throw new AppError('Esse horário acabou de ser ocupado, escolha outro');
       }
+
       throw error;
     }
   });
@@ -99,63 +107,77 @@ export async function listarAgendamentos(filtros: {
     valores.push(filtros.clienteId);
     condicoes.push(`a.cliente_id = $${valores.length}`);
   }
+
   if (filtros.profissionalId) {
     valores.push(filtros.profissionalId);
     condicoes.push(`a.profissional_id = $${valores.length}`);
   }
+
   if (filtros.servicoId) {
     valores.push(filtros.servicoId);
     condicoes.push(`a.servico_id = $${valores.length}`);
   }
+
   if (filtros.buscaCliente) {
     valores.push(`%${filtros.buscaCliente}%`);
     condicoes.push(`(c.nome ILIKE $${valores.length} OR c.telefone ILIKE $${valores.length})`);
   }
+
   if (filtros.status) {
     valores.push(filtros.status);
     condicoes.push(`a.status = $${valores.length}`);
   }
+
   if (filtros.apenasFuturos) {
     valores.push(new Date());
     condicoes.push(`a.data_hora >= $${valores.length} AND a.status != 'cancelado'`);
   }
+
   if (filtros.historico) {
     const agora = new Date();
     const limite = new Date(agora.getTime() - DIAS_HISTORICO * 24 * 60 * 60 * 1000);
+
     valores.push(limite, agora);
+
     const iLimite = valores.length - 1;
     const iAgora = valores.length;
+
     condicoes.push(`(
       (a.status = 'completo' AND a.data_hora BETWEEN $${iLimite} AND $${iAgora})
       OR (a.status = 'cancelado' AND EXISTS (
-        SELECT 1 FROM historico_agendamentos h
+        SELECT 1
+        FROM historico_agendamentos h
         WHERE h.agendamento_id = a.id
           AND h.status_novo = 'cancelado'
           AND h.alterado_em BETWEEN $${iLimite} AND $${iAgora}
       ))
     )`);
   }
+
   if (filtros.dataInicio && filtros.dataFim) {
     const inicioDia = inicioDoDiaBRT(filtros.dataInicio);
     const fimDia = fimDoDiaBRT(filtros.dataFim);
+
     valores.push(inicioDia, fimDia);
+
     condicoes.push(`a.data_hora BETWEEN $${valores.length - 1} AND $${valores.length}`);
   }
 
   const where = condicoes.length > 0 ? `WHERE ${condicoes.join(' AND ')}` : '';
+
   const ordem = filtros.historico ? 'a.data_hora DESC' : 'a.data_hora ASC';
 
   const { rows } = await pool.query(
     `SELECT
-      a.*,
-      c.nome AS cliente_nome,
-      c.telefone AS cliente_telefone,
-      p.nome AS profissional_nome,
-      s.nome AS servico_nome
-    FROM agendamentos a
-    JOIN clientes c ON c.id = a.cliente_id
-    JOIN profissionais p ON p.id = a.profissional_id
-    JOIN servicos s ON s.id = a.servico_id
+       a.*,
+       c.nome AS cliente_nome,
+       c.telefone AS cliente_telefone,
+       p.nome AS profissional_nome,
+       s.nome AS servico_nome
+     FROM agendamentos a
+     JOIN clientes c ON c.id = a.cliente_id
+     JOIN profissionais p ON p.id = a.profissional_id
+     JOIN servicos s ON s.id = a.servico_id
      ${where}
      ORDER BY ${ordem}`,
     valores,
@@ -171,19 +193,21 @@ export async function calcularReceita(filtros: { dataInicio?: Date; dataFim?: Da
   if (filtros.dataInicio && filtros.dataFim) {
     const inicioDia = inicioDoDiaBRT(filtros.dataInicio);
     const fimDia = fimDoDiaBRT(filtros.dataFim);
+
     valores.push(inicioDia, fimDia);
+
     condicoes.push(`a.data_hora BETWEEN $${valores.length - 1} AND $${valores.length}`);
   }
 
   const { rows } = await pool.query(
     `SELECT
-      s.id AS servico_id,
-     s.nome AS servico_nome,
-     COUNT(*)::int AS quantidade,
-     COALESCE(SUM(a.preco), 0) AS total,
-     COUNT(*) FILTER (WHERE a.preco IS NULL)::int AS sem_preco
-    FROM agendamentos a
-    JOIN servicos s ON s.id = a.servico_id
+       s.id AS servico_id,
+       s.nome AS servico_nome,
+       COUNT(*)::int AS quantidade,
+       COALESCE(SUM(a.preco), 0) AS total,
+       COUNT(*) FILTER (WHERE a.preco IS NULL)::int AS sem_preco
+     FROM agendamentos a
+     JOIN servicos s ON s.id = a.servico_id
      WHERE ${condicoes.join(' AND ')}
      GROUP BY s.id, s.nome
      ORDER BY total DESC`,
@@ -191,6 +215,7 @@ export async function calcularReceita(filtros: { dataInicio?: Date; dataFim?: Da
   );
 
   const totalGeral = rows.reduce((soma, r) => soma + Number(r.total), 0);
+
   const quantidadeSemPreco = rows.reduce((soma, r) => soma + r.sem_preco, 0);
 
   return {
@@ -208,27 +233,39 @@ export async function calcularReceita(filtros: { dataInicio?: Date; dataFim?: Da
 
 export async function buscarPorId(agendamentoId: number): Promise<Agendamento> {
   const { rows } = await pool.query(`SELECT * FROM agendamentos WHERE id = $1`, [agendamentoId]);
+
   if (rows.length === 0) {
     throw new AppError('Agendamento não encontrado', 404);
   }
+
   return rows[0];
 }
 
 export async function atualizarObservacoes(agendamentoId: number, observacoes: string | null) {
   const { rows } = await pool.query(
-    `UPDATE agendamentos SET observacoes = $1 WHERE id = $2 RETURNING *`,
+    `UPDATE agendamentos
+     SET observacoes = $1
+     WHERE id = $2
+     RETURNING *`,
     [observacoes, agendamentoId],
   );
+
   if (rows.length === 0) {
     throw new AppError('Agendamento não encontrado', 404);
   }
+
   return rows[0] as Agendamento;
 }
 
 export async function cancelarAgendamento(agendamentoId: number) {
   const agendamento = await buscarPorId(agendamentoId);
 
-  await pool.query(`UPDATE agendamentos SET status = 'cancelado' WHERE id = $1`, [agendamentoId]);
+  await pool.query(
+    `UPDATE agendamentos
+     SET status = 'cancelado'
+     WHERE id = $1`,
+    [agendamentoId],
+  );
 
   await registrarHistorico(agendamentoId, agendamento.status, 'cancelado');
 }
@@ -252,22 +289,35 @@ export async function marcarComoCompleto(agendamentoId: number) {
   if (agendamento.status === 'cancelado') {
     throw new AppError('Não é possível marcar um agendamento cancelado como concluído');
   }
+
   if (agendamento.status === 'completo') {
-    return agendamento; // idempotente — já estava concluído, não é erro
+    return agendamento;
   }
 
-  await pool.query(`UPDATE agendamentos SET status = 'completo' WHERE id = $1`, [agendamentoId]);
+  await pool.query(
+    `UPDATE agendamentos
+     SET status = 'completo'
+     WHERE id = $1`,
+    [agendamentoId],
+  );
+
   await registrarHistorico(agendamentoId, agendamento.status, 'completo');
 
-  return { ...agendamento, status: 'completo' };
+  return {
+    ...agendamento,
+    status: 'completo',
+  };
 }
 
 export async function concluirAgendamentosPassados(): Promise<number> {
   const { rows } = await pool.query(
     `SELECT a.id
-   FROM agendamentos a
-   WHERE a.status IN ('agendado', 'confirmado')
-     AND (a.data_hora + (a.duracao_minutos || ' minutes')::interval) < now()`,
+     FROM agendamentos a
+     WHERE a.status IN ('agendado', 'confirmado')
+       AND (
+         a.data_hora +
+         (a.duracao_minutos || ' minutes')::interval
+       ) < now()`,
   );
 
   for (const row of rows) {
@@ -278,62 +328,116 @@ export async function concluirAgendamentosPassados(): Promise<number> {
 }
 
 export async function reagendarAgendamento(agendamentoId: number, novaDataHora: Date) {
-  const agendamento = await buscarPorId(agendamentoId);
+  return comLockDeAgendamento(agendamentoId, async () => {
+    const agendamento = await buscarPorId(agendamentoId);
+    const duracaoMinutos = agendamento.duracao_minutos;
 
-  const duracaoMinutos = agendamento.duracao_minutos;
-
-  const profissionalId = await obterProfissionalDisponivel(
-    agendamento.servico_id,
-    novaDataHora,
-    duracaoMinutos,
-  );
-
-  const antecedenciaMinimaHoras = await buscarAntecedenciaMinima(profissionalId);
-  const horasAteNovoAgendamento = (novaDataHora.getTime() - Date.now()) / (1000 * 60 * 60);
-  if (horasAteNovoAgendamento < antecedenciaMinimaHoras) {
-    throw new AppError(
-      `Reagendamentos precisam ser feitos com pelo menos ${antecedenciaMinimaHoras}h de antecedência`,
+    const profissionalId = await obterProfissionalDisponivel(
+      agendamento.servico_id,
+      novaDataHora,
+      duracaoMinutos,
+      agendamentoId,
     );
+
+    return comLockDeProfissional(profissionalId, async () => {
+      const atende = await profissionalAtendeServico(profissionalId, agendamento.servico_id);
+
+      if (!atende) {
+        throw new AppError('Esse profissional não atende esse serviço');
+      }
+
+      await validarHorarioDisponivel(profissionalId, novaDataHora, duracaoMinutos, agendamentoId);
+
+      const antecedenciaMinimaHoras = await buscarAntecedenciaMinima(profissionalId);
+
+      const horasAteNovoAgendamento = (novaDataHora.getTime() - Date.now()) / (1000 * 60 * 60);
+
+      if (horasAteNovoAgendamento < antecedenciaMinimaHoras) {
+        throw new AppError(
+          `Reagendamentos precisam ser feitos com pelo menos ${antecedenciaMinimaHoras}h de antecedência`,
+        );
+      }
+
+      await pool.query(
+        `UPDATE agendamentos
+         SET data_hora = $1,
+             profissional_id = $2,
+             lembrete_enviado = false
+         WHERE id = $3`,
+        [novaDataHora, profissionalId, agendamentoId],
+      );
+
+      await registrarHistorico(
+        agendamentoId,
+        agendamento.status,
+        agendamento.status,
+        agendamento.data_hora,
+      );
+    });
+  });
+}
+
+async function validarConflitoDeHorario(
+  profissionalId: number,
+  agendamentoId: number,
+  novaDataHora: Date,
+  duracaoMinutos: number,
+) {
+  const { rows } = await pool.query(
+    `SELECT 1
+     FROM agendamentos a
+     WHERE a.profissional_id = $1
+       AND a.id <> $2
+       AND a.status != 'cancelado'
+       AND a.data_hora <
+           $3 + ($4 || ' minutes')::interval
+       AND a.data_hora +
+           (a.duracao_minutos || ' minutes')::interval > $3
+     LIMIT 1`,
+    [profissionalId, agendamentoId, novaDataHora, duracaoMinutos],
+  );
+
+  if (rows.length > 0) {
+    throw new AppError('Esse horário entra em conflito com outro agendamento do profissional');
   }
-
-  await pool.query(
-    `UPDATE agendamentos SET data_hora = $1, profissional_id = $2, lembrete_enviado = false WHERE id = $3`,
-    [novaDataHora, profissionalId, agendamentoId],
-  );
-
-  await registrarHistorico(
-    agendamentoId,
-    agendamento.status,
-    agendamento.status,
-    agendamento.data_hora,
-  );
 }
 
 export async function reagendarComoAdmin(agendamentoId: number, novaDataHora: Date) {
-  const agendamento = await buscarPorId(agendamentoId);
+  return comLockDeAgendamento(agendamentoId, async () => {
+    const agendamento = await buscarPorId(agendamentoId);
 
-  function ehViolacaoDeConstraintUnica(error: unknown): error is { code: string } {
-    return typeof error === 'object' && error !== null && 'code' in error;
-  }
+    return comLockDeProfissional(agendamento.profissional_id, async () => {
+      await validarConflitoDeHorario(
+        agendamento.profissional_id,
+        agendamentoId,
+        novaDataHora,
+        agendamento.duracao_minutos,
+      );
 
-  try {
-    await pool.query(
-      `UPDATE agendamentos SET data_hora = $1, lembrete_enviado = false WHERE id = $2`,
-      [novaDataHora, agendamentoId],
-    );
-  } catch (error) {
-    if (ehViolacaoDeConstraintUnica(error) && error.code === '23505') {
-      throw new AppError('Já existe um agendamento nesse exato horário para esse profissional');
-    }
-    throw error;
-  }
+      try {
+        await pool.query(
+          `UPDATE agendamentos
+             SET data_hora = $1,
+                 lembrete_enviado = false
+             WHERE id = $2`,
+          [novaDataHora, agendamentoId],
+        );
+      } catch (error) {
+        if (ehViolacaoDeConstraintUnica(error) && error.code === '23505') {
+          throw new AppError('Já existe um agendamento nesse exato horário para esse profissional');
+        }
 
-  await registrarHistorico(
-    agendamentoId,
-    agendamento.status,
-    agendamento.status,
-    agendamento.data_hora,
-  );
+        throw error;
+      }
+
+      await registrarHistorico(
+        agendamentoId,
+        agendamento.status,
+        agendamento.status,
+        agendamento.data_hora,
+      );
+    });
+  });
 }
 
 async function registrarHistorico(

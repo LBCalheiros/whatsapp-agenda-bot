@@ -149,6 +149,7 @@ export async function consultarHorariosDisponiveis(
   profissionalId: number,
   data: Date,
   duracaoMinutos: number,
+  agendamentoIdIgnorado?: number,
 ): Promise<Date[]> {
   const dataLocal = paraHorarioLocal(data);
   const diaSemana = dataLocal.getUTCDay();
@@ -198,8 +199,9 @@ export async function consultarHorariosDisponiveis(
    FROM agendamentos a
    WHERE a.profissional_id = $1
      AND a.data_hora BETWEEN $2 AND $3
-     AND a.status != 'cancelado'`,
-    [profissionalId, inicioDia, fimDia],
+     AND a.status != 'cancelado'
+     AND ($4::integer IS NULL OR a.id <> $4)`,
+    [profissionalId, inicioDia, fimDia, agendamentoIdIgnorado ?? null],
   );
 
   const faixasOcupadas = ocupados.map((r) => {
@@ -252,15 +254,11 @@ export async function consultarHorariosDisponiveisParaServico(
   return [...conjunto.values()].sort((a, b) => a.getTime() - b.getTime());
 }
 
-// No momento de confirmar (não de listar), decide QUAL profissional específico
-// vai ficar com o agendamento — o primeiro, entre os que atendem o serviço,
-// que estiver realmente livre naquele instante exato. Reconfere do zero (não
-// reaproveita o resultado da listagem), porque o tempo passou entre o cliente
-// ver a lista e confirmar, e outro agendamento pode ter ocupado o horário.
 export async function obterProfissionalDisponivel(
   servicoId: number,
   dataHora: Date,
   duracaoMinutos: number,
+  agendamentoIdIgnorado?: number,
 ): Promise<number> {
   const { rows: profissionais } = await pool.query(
     `SELECT p.id FROM profissionais p
@@ -271,7 +269,12 @@ export async function obterProfissionalDisponivel(
   );
 
   for (const { id: profissionalId } of profissionais) {
-    const horarios = await consultarHorariosDisponiveis(profissionalId, dataHora, duracaoMinutos);
+    const horarios = await consultarHorariosDisponiveis(
+      profissionalId,
+      dataHora,
+      duracaoMinutos,
+      agendamentoIdIgnorado,
+    );
     if (horarios.some((h) => h.getTime() === dataHora.getTime())) {
       return profissionalId;
     }
@@ -284,8 +287,15 @@ export async function validarHorarioDisponivel(
   profissionalId: number,
   dataHora: Date,
   duracaoMinutos: number,
+  agendamentoIdIgnorado?: number,
 ) {
-  const disponiveis = await consultarHorariosDisponiveis(profissionalId, dataHora, duracaoMinutos);
+  const disponiveis = await consultarHorariosDisponiveis(
+    profissionalId,
+    dataHora,
+    duracaoMinutos,
+    agendamentoIdIgnorado,
+  );
+
   const valido = disponiveis.some((d) => d.getTime() === dataHora.getTime());
 
   if (!valido) {
