@@ -199,7 +199,7 @@ export async function consultarHorariosDisponiveis(
    FROM agendamentos a
    WHERE a.profissional_id = $1
      AND a.data_hora BETWEEN $2 AND $3
-     AND a.status != 'cancelado'
+     AND a.status IN ('agendado', 'confirmado')
      AND ($4::integer IS NULL OR a.id <> $4)`,
     [profissionalId, inicioDia, fimDia, agendamentoIdIgnorado ?? null],
   );

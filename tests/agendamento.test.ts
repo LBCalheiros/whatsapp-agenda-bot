@@ -3,8 +3,11 @@ import { AppError } from '@/infra/errors';
 import {
   ANTECEDENCIA_MINIMA_HORAS,
   criarAgendamento,
+  cancelarAgendamento,
   cancelarComoCliente,
   reagendarAgendamento,
+  reagendarComoAdmin,
+  marcarComoCompleto,
   concluirAgendamentosPassados,
 } from '@/models/agendamento';
 import { paraHorarioLocal } from '@/infra/data';
@@ -123,6 +126,18 @@ describe('models/agendamento (integração)', () => {
        FROM generate_series(0, 6) AS dia`,
       [profissionalId],
     );
+  });
+
+  afterEach(async () => {
+    await pool.query(
+      `DELETE FROM historico_agendamentos
+     WHERE agendamento_id IN (
+       SELECT id FROM agendamentos WHERE profissional_id = $1
+     )`,
+      [profissionalId],
+    );
+
+    await pool.query(`DELETE FROM agendamentos WHERE profissional_id = $1`, [profissionalId]);
   });
 
   afterAll(async () => {
@@ -315,6 +330,185 @@ describe('models/agendamento (integração)', () => {
     expect(rows.length).toBeGreaterThan(0);
   });
 
+  it('não permite cancelar um agendamento já concluído', async () => {
+    const agendamento = await criarAgendamento({
+      clienteId,
+      profissionalId,
+      servicoId,
+      dataHora: dataFutura(120),
+    });
+
+    await marcarComoCompleto(agendamento.id);
+
+    await expect(cancelarAgendamento(agendamento.id)).rejects.toMatchObject({
+      message: expect.stringContaining('completo'),
+    });
+  });
+
+  it('não permite concluir um agendamento cancelado', async () => {
+    const agendamento = await criarAgendamento({
+      clienteId,
+      profissionalId,
+      servicoId,
+      dataHora: dataFutura(120),
+    });
+
+    await cancelarAgendamento(agendamento.id);
+
+    await expect(marcarComoCompleto(agendamento.id)).rejects.toMatchObject({
+      message: expect.stringContaining('cancelado'),
+    });
+  });
+
+  it('não permite concluir novamente um agendamento já concluído', async () => {
+    const agendamento = await criarAgendamento({
+      clienteId,
+      profissionalId,
+      servicoId,
+      dataHora: dataFutura(120),
+    });
+
+    await marcarComoCompleto(agendamento.id);
+    const historicoAntes = await pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM historico_agendamentos
+       WHERE agendamento_id = $1`,
+      [agendamento.id],
+    );
+
+    const resultado = await marcarComoCompleto(agendamento.id);
+
+    expect(resultado.status).toBe('completo');
+
+    const historicoDepois = await pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM historico_agendamentos
+       WHERE agendamento_id = $1`,
+      [agendamento.id],
+    );
+
+    expect(historicoDepois.rows[0].total).toBe(historicoAntes.rows[0].total);
+  });
+
+  it('permite reagendamento administrativo sem antecedência mínima', async () => {
+    const agendamento = await criarAgendamento({
+      clienteId,
+      profissionalId,
+      servicoId,
+      dataHora: dataFutura(120),
+    });
+
+    const novaDataHora = new Date(Date.now() + 30 * 60 * 1000);
+    await reagendarComoAdmin(agendamento.id, novaDataHora);
+
+    const { rows } = await pool.query(`SELECT data_hora FROM agendamentos WHERE id = $1`, [
+      agendamento.id,
+    ]);
+
+    expect(new Date(rows[0].data_hora).getTime()).toBe(novaDataHora.getTime());
+  });
+
+  it('não trata agendamento concluído como conflito de horário', async () => {
+    const horarioOcupado = dataFutura(180);
+    const ocupante = await criarAgendamento({
+      clienteId,
+      profissionalId,
+      servicoId,
+      dataHora: horarioOcupado,
+    });
+
+    await marcarComoCompleto(ocupante.id);
+
+    const paraReagendar = await criarAgendamento({
+      clienteId,
+      profissionalId,
+      servicoId,
+      dataHora: dataFutura(240),
+    });
+
+    await expect(reagendarComoAdmin(paraReagendar.id, horarioOcupado)).resolves.toBeUndefined();
+
+    const { rows } = await pool.query(`SELECT data_hora FROM agendamentos WHERE id = $1`, [
+      paraReagendar.id,
+    ]);
+    expect(new Date(rows[0].data_hora).getTime()).toBe(horarioOcupado.getTime());
+  });
+
+  it('não permite reagendar um agendamento já concluído pelo admin', async () => {
+    const agendamento = await criarAgendamento({
+      clienteId,
+      profissionalId,
+      servicoId,
+      dataHora: dataFutura(120),
+    });
+
+    await marcarComoCompleto(agendamento.id);
+
+    await expect(reagendarComoAdmin(agendamento.id, dataFutura(180))).rejects.toMatchObject({
+      message: expect.stringContaining('agendamentos ativos'),
+    });
+  });
+
+  it('não conclui um agendamento antes do fim da duração', async () => {
+    const inicio = new Date(Date.now() - 5 * 60 * 1000);
+    const agendamento = await pool.query(
+      `INSERT INTO agendamentos
+       (cliente_id, profissional_id, servico_id, data_hora, duracao_minutos, preco)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id`,
+      [clienteId, profissionalId, servicoId, inicio, 30, 50],
+    );
+
+    await concluirAgendamentosPassados();
+
+    const atual = await pool.query(`SELECT status FROM agendamentos WHERE id = $1`, [
+      agendamento.rows[0].id,
+    ]);
+    expect(atual.rows[0].status).toBe('agendado');
+
+    await pool.query(`DELETE FROM agendamentos WHERE id = $1`, [agendamento.rows[0].id]);
+  });
+
+  it('não repete histórico ao executar a conclusão automática duas vezes', async () => {
+    const inicio = new Date(Date.now() - 60 * 60 * 1000);
+    const agendamento = await pool.query(
+      `INSERT INTO agendamentos
+       (cliente_id, profissional_id, servico_id, data_hora, duracao_minutos, preco)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id`,
+      [clienteId, profissionalId, servicoId, inicio, 30, 50],
+    );
+
+    await concluirAgendamentosPassados();
+    const historicoDepoisPrimeiraExecucao = await pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM historico_agendamentos
+       WHERE agendamento_id = $1`,
+      [agendamento.rows[0].id],
+    );
+
+    await concluirAgendamentosPassados();
+    const historicoDepoisSegundaExecucao = await pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM historico_agendamentos
+       WHERE agendamento_id = $1`,
+      [agendamento.rows[0].id],
+    );
+
+    const atual = await pool.query(`SELECT status FROM agendamentos WHERE id = $1`, [
+      agendamento.rows[0].id,
+    ]);
+
+    expect(atual.rows[0].status).toBe('completo');
+    expect(historicoDepoisPrimeiraExecucao.rows[0].total).toBe(1);
+    expect(historicoDepoisSegundaExecucao.rows[0].total).toBe(1);
+
+    await pool.query(`DELETE FROM historico_agendamentos WHERE agendamento_id = $1`, [
+      agendamento.rows[0].id,
+    ]);
+    await pool.query(`DELETE FROM agendamentos WHERE id = $1`, [agendamento.rows[0].id]);
+  });
+
   it('conclui automaticamente agendamento usando a duração do snapshot', async () => {
     const servicoSnapshot = await pool.query(
       `INSERT INTO servicos (nome, duracao_minutos, preco, ativo)
@@ -341,10 +535,9 @@ describe('models/agendamento (integração)', () => {
     ]);
     expect(atual.rows[0].status).toBe('completo');
 
-    await pool.query(
-      `DELETE FROM historico_agendamentos WHERE agendamento_id = $1`,
-      [agendamento.rows[0].id],
-    );
+    await pool.query(`DELETE FROM historico_agendamentos WHERE agendamento_id = $1`, [
+      agendamento.rows[0].id,
+    ]);
     await pool.query(`DELETE FROM agendamentos WHERE id = $1`, [agendamento.rows[0].id]);
     await pool.query(`DELETE FROM servicos WHERE id = $1`, [servicoSnapshotId]);
   });

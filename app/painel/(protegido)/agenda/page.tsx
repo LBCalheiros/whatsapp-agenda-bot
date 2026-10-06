@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { formatarDataYYYYMMDD } from '@/infra/data';
 
 type StatusAgendamento = 'agendado' | 'confirmado' | 'cancelado' | 'completo' | 'nao_compareceu';
 
@@ -87,10 +88,6 @@ function paraInputDatetimeLocal(iso: string): string {
   return partes.replace(' ', 'T');
 }
 
-function paraDataYYYYMMDD(data: Date): string {
-  return data.toISOString().slice(0, 10);
-}
-
 function linkWhatsapp(telefone: string): string {
   return `https://wa.me/${telefone.replace(/\D/g, '')}`;
 }
@@ -98,21 +95,21 @@ function linkWhatsapp(telefone: string): string {
 function SecaoReceita() {
   const [periodo, setPeriodo] = useState<PeriodoReceita>('mes');
   const hoje = new Date();
-  const [dataInicioCustom, setDataInicioCustom] = useState(paraDataYYYYMMDD(hoje));
-  const [dataFimCustom, setDataFimCustom] = useState(paraDataYYYYMMDD(hoje));
+  const [dataInicioCustom, setDataInicioCustom] = useState(formatarDataYYYYMMDD(hoje));
+  const [dataFimCustom, setDataFimCustom] = useState(formatarDataYYYYMMDD(hoje));
 
   const { dataInicio, dataFim } = useMemo(() => {
     if (periodo === 'tudo') return { dataInicio: '', dataFim: '' };
     if (periodo === 'personalizado')
       return { dataInicio: dataInicioCustom, dataFim: dataFimCustom };
     if (periodo === 'hoje') {
-      const hojeStr = paraDataYYYYMMDD(new Date());
+      const hojeStr = formatarDataYYYYMMDD(new Date());
       return { dataInicio: hojeStr, dataFim: hojeStr };
     }
     // mes: do dia 1 até hoje
     const agora = new Date();
     const inicioMes = new Date(agora.getFullYear(), agora.getMonth(), 1);
-    return { dataInicio: paraDataYYYYMMDD(inicioMes), dataFim: paraDataYYYYMMDD(agora) };
+    return { dataInicio: formatarDataYYYYMMDD(inicioMes), dataFim: formatarDataYYYYMMDD(agora) };
   }, [periodo, dataInicioCustom, dataFimCustom]);
 
   const caminho = useMemo(() => {
@@ -257,7 +254,7 @@ export default function AgendaPage() {
     const hoje = new Date();
     const dias = periodo === 'hoje' ? 0 : periodo === 'semana' ? 7 : 30;
     const fim = new Date(hoje.getTime() + dias * 24 * 60 * 60 * 1000);
-    return { dataInicio: paraDataYYYYMMDD(hoje), dataFim: paraDataYYYYMMDD(fim) };
+    return { dataInicio: formatarDataYYYYMMDD(hoje), dataFim: formatarDataYYYYMMDD(fim) };
   }, [aba, periodo]);
 
   const caminhoLista = useMemo(() => {

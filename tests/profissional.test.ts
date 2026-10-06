@@ -1,5 +1,9 @@
 import { pool } from '@/infra/database';
-import { excluirProfissional } from '@/models/profissional';
+import {
+  atualizarProfissional,
+  criarProfissional,
+  excluirProfissional,
+} from '@/models/profissional';
 
 describe('models/profissional (integração)', () => {
   let profissionalExcluivelId: number;
@@ -94,5 +98,77 @@ describe('models/profissional (integração)', () => {
       message: expect.stringContaining('possui agendamentos'),
       statusCode: 409,
     });
+  });
+
+  it('cria profissional e vínculos de serviços na mesma transação', async () => {
+    const profissional = await criarProfissional({
+      nome: 'Profissional vínculo Jest',
+      telefoneContato: '5511900000015',
+      servicoIds: [servicoId],
+    });
+
+    const { rows: vinculos } = await pool.query(
+      `SELECT servico_id
+       FROM profissional_servicos
+       WHERE profissional_id = $1`,
+      [profissional.id],
+    );
+
+    expect(vinculos).toEqual([{ servico_id: servicoId }]);
+
+    await excluirProfissional(profissional.id);
+  });
+
+  it('não deixa uma criação com vínculo inválido parcialmente persistida', async () => {
+    const nome = 'Profissional rollback criação Jest';
+
+    await expect(
+      criarProfissional({
+        nome,
+        telefoneContato: '5511900000099',
+        servicoIds: [servicoId, 999999999],
+      }),
+    ).rejects.toMatchObject({ statusCode: 404 });
+
+    const { rows } = await pool.query(`SELECT id FROM profissionais WHERE nome = $1`, [nome]);
+
+    expect(rows).toHaveLength(0);
+  });
+
+  it('atualiza dados e vínculos do profissional na mesma transação', async () => {
+    await pool.query(
+      `UPDATE profissionais
+       SET nome = 'Profissional apoio Jest', telefone_contato = '5511900000011'
+       WHERE id = $1`,
+      [profissionalApoioId],
+    );
+
+    await expect(
+      atualizarProfissional(profissionalApoioId, {
+        nome: 'Nome que deve sofrer rollback',
+        telefoneContato: '5511900099999',
+        servicoIds: [servicoId, 999999999],
+      }),
+    ).rejects.toMatchObject({ statusCode: 404 });
+
+    const { rows: profissional } = await pool.query(
+      `SELECT nome, telefone_contato
+       FROM profissionais WHERE id = $1`,
+      [profissionalApoioId],
+    );
+
+    expect(profissional[0]).toMatchObject({
+      nome: 'Profissional apoio Jest',
+      telefone_contato: '5511900000011',
+    });
+
+    const { rows: vinculos } = await pool.query(
+      `SELECT servico_id
+       FROM profissional_servicos
+       WHERE profissional_id = $1`,
+      [profissionalApoioId],
+    );
+
+    expect(vinculos).toHaveLength(0);
   });
 });

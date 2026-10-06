@@ -6,18 +6,18 @@ describe('sessao', () => {
   });
 
   it('cria e verifica um token válido', () => {
-    const token = criarTokenSessao(1, 'admin', 0);
+    const token = criarTokenSessao(1, 'gerente', 0);
     const payload = verificarTokenSessao(token);
     expect(payload).toEqual({
       usuarioId: 1,
-      role: 'admin',
+      role: 'gerente',
       versaoToken: 0,
       exp: expect.any(Number),
     });
   });
 
   it('rejeita token adulterado', () => {
-    const token = criarTokenSessao(1, 'admin', 0);
+    const token = criarTokenSessao(1, 'gerente', 0);
     const adulterado = token.slice(0, -2) + 'zz';
     expect(verificarTokenSessao(adulterado)).toBeNull();
   });
@@ -25,7 +25,7 @@ describe('sessao', () => {
   it('rejeita token expirado', () => {
     const originalNow = Date.now;
     Date.now = () => originalNow() - 8 * 24 * 60 * 60 * 1000;
-    const tokenAntigo = criarTokenSessao(1, 'admin', 0);
+    const tokenAntigo = criarTokenSessao(1, 'gerente', 0);
     Date.now = originalNow;
 
     expect(verificarTokenSessao(tokenAntigo)).toBeNull();

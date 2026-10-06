@@ -53,3 +53,12 @@ export function formatarDataHora(data: Date): string {
     minute: '2-digit',
   });
 }
+
+export function formatarDataYYYYMMDD(data: Date): string {
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: FUSO_HORARIO,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(data);
+}

@@ -96,4 +96,3 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     return Response.json({ error: 'Erro interno' }, { status: 500 });
   }
 }
-

@@ -1,4 +1,4 @@
-import { pool } from '@/infra/database';
+import { pool, withTransaction } from '@/infra/database';
 import { AppError } from '@/infra/errors';
 import { fimDoDiaBRT, inicioDoDiaBRT } from '@/infra/data';
 import { obterProfissionalDisponivel, validarHorarioDisponivel } from '@/models/disponibilidade';
@@ -6,13 +6,15 @@ import { buscarAntecedenciaMinima, profissionalAtendeServico } from '@/models/pr
 import { comLockDeProfissional } from '@/infra/lockProfissional';
 import { comLockDeAgendamento } from '@/infra/lockAgendamento';
 
+type StatusAgendamento = 'agendado' | 'confirmado' | 'cancelado' | 'completo' | 'nao_compareceu';
+
 type Agendamento = {
   id: number;
   cliente_id: number;
   profissional_id: number;
   servico_id: number;
   data_hora: string;
-  status: string;
+  status: StatusAgendamento;
   lembrete_enviado: boolean;
   observacoes: string | null;
   duracao_minutos: number;
@@ -231,6 +233,24 @@ export async function calcularReceita(filtros: { dataInicio?: Date; dataFim?: Da
   };
 }
 
+function validarTransicaoStatus(statusAtual: StatusAgendamento, statusNovo: StatusAgendamento) {
+  const transicoesPermitidas: Record<StatusAgendamento, readonly StatusAgendamento[]> = {
+    agendado: ['confirmado', 'cancelado', 'completo', 'nao_compareceu'],
+    confirmado: ['cancelado', 'completo', 'nao_compareceu'],
+    cancelado: [],
+    completo: [],
+    nao_compareceu: [],
+  };
+
+  if (statusAtual === statusNovo) return;
+
+  if (!transicoesPermitidas[statusAtual].includes(statusNovo)) {
+    throw new AppError(
+      `Não é possível alterar um agendamento de ${statusAtual} para ${statusNovo}`,
+    );
+  }
+}
+
 export async function buscarPorId(agendamentoId: number): Promise<Agendamento> {
   const { rows } = await pool.query(`SELECT * FROM agendamentos WHERE id = $1`, [agendamentoId]);
 
@@ -257,56 +277,107 @@ export async function atualizarObservacoes(agendamentoId: number, observacoes: s
   return rows[0] as Agendamento;
 }
 
+async function cancelarSemLock(agendamento: Agendamento): Promise<Agendamento> {
+  validarTransicaoStatus(agendamento.status, 'cancelado');
+
+  return withTransaction(async (client) => {
+    const { rows } = await client.query(
+      `UPDATE agendamentos
+       SET status = 'cancelado'
+       WHERE id = $1 AND status = $2
+       RETURNING *`,
+      [agendamento.id, agendamento.status],
+    );
+
+    if (rows.length === 0) {
+      throw new AppError('Agendamento foi alterado por outra operação');
+    }
+
+    await registrarHistoricoNaTransacao(client, agendamento.id, agendamento.status, 'cancelado');
+
+    return rows[0] as Agendamento;
+  });
+}
+
 export async function cancelarAgendamento(agendamentoId: number) {
-  const agendamento = await buscarPorId(agendamentoId);
+  return comLockDeAgendamento(agendamentoId, async () => {
+    const agendamento = await buscarPorId(agendamentoId);
 
-  await pool.query(
-    `UPDATE agendamentos
-     SET status = 'cancelado'
-     WHERE id = $1`,
-    [agendamentoId],
-  );
+    if (agendamento.status === 'cancelado') {
+      return agendamento;
+    }
 
-  await registrarHistorico(agendamentoId, agendamento.status, 'cancelado');
+    return cancelarSemLock(agendamento);
+  });
 }
 
 export async function cancelarComoCliente(agendamentoId: number) {
-  const agendamento = await buscarPorId(agendamentoId);
+  return comLockDeAgendamento(agendamentoId, async () => {
+    const agendamento = await buscarPorId(agendamentoId);
 
-  const horasAteAgendamento =
-    (new Date(agendamento.data_hora).getTime() - Date.now()) / (1000 * 60 * 60);
+    if (agendamento.status === 'cancelado') {
+      return agendamento;
+    }
 
-  if (horasAteAgendamento < 24) {
-    throw new AppError('Cancelamento só é permitido até 24h antes do horário agendado');
-  }
+    const horasAteAgendamento =
+      (new Date(agendamento.data_hora).getTime() - Date.now()) / (1000 * 60 * 60);
 
-  return cancelarAgendamento(agendamentoId);
+    if (horasAteAgendamento < 24) {
+      throw new AppError('Cancelamento só é permitido até 24h antes do horário agendado');
+    }
+
+    return cancelarSemLock(agendamento);
+  });
 }
 
-export async function marcarComoCompleto(agendamentoId: number) {
-  const agendamento = await buscarPorId(agendamentoId);
-
-  if (agendamento.status === 'cancelado') {
-    throw new AppError('Não é possível marcar um agendamento cancelado como concluído');
-  }
-
+async function marcarComoCompletoSemLock(
+  agendamento: Agendamento,
+  somenteSeJaTerminou: boolean,
+): Promise<Agendamento | null> {
   if (agendamento.status === 'completo') {
     return agendamento;
   }
 
-  await pool.query(
-    `UPDATE agendamentos
-     SET status = 'completo'
-     WHERE id = $1`,
-    [agendamentoId],
-  );
+  validarTransicaoStatus(agendamento.status, 'completo');
 
-  await registrarHistorico(agendamentoId, agendamento.status, 'completo');
+  if (somenteSeJaTerminou) {
+    const fim = new Date(
+      new Date(agendamento.data_hora).getTime() + agendamento.duracao_minutos * 60_000,
+    );
 
-  return {
-    ...agendamento,
-    status: 'completo',
-  };
+    if (fim >= new Date()) {
+      return null;
+    }
+  }
+
+  return withTransaction(async (client) => {
+    const { rows } = await client.query(
+      `UPDATE agendamentos
+       SET status = 'completo'
+       WHERE id = $1 AND status = $2
+       RETURNING *`,
+      [agendamento.id, agendamento.status],
+    );
+
+    if (rows.length === 0) {
+      throw new AppError('Agendamento foi alterado por outra operação');
+    }
+
+    await registrarHistoricoNaTransacao(client, agendamento.id, agendamento.status, 'completo');
+
+    return rows[0] as Agendamento;
+  });
+}
+
+export async function marcarComoCompleto(agendamentoId: number): Promise<Agendamento> {
+  return comLockDeAgendamento(agendamentoId, async () => {
+    const agendamento = await buscarPorId(agendamentoId);
+    const resultado = await marcarComoCompletoSemLock(agendamento, false);
+    if (!resultado) {
+      throw new AppError('Não foi possível concluir o agendamento');
+    }
+    return resultado;
+  });
 }
 
 export async function concluirAgendamentosPassados(): Promise<number> {
@@ -323,24 +394,20 @@ export async function concluirAgendamentosPassados(): Promise<number> {
   let concluidos = 0;
 
   for (const row of rows) {
-    await comLockDeAgendamento(row.id, async () => {
+    const concluiu = await comLockDeAgendamento(row.id, async () => {
       const agendamento = await buscarPorId(row.id);
 
       if (!['agendado', 'confirmado'].includes(agendamento.status)) {
-        return;
+        return false;
       }
 
-      const fim = new Date(
-        new Date(agendamento.data_hora).getTime() + agendamento.duracao_minutos * 60_000,
-      );
-
-      if (fim >= new Date()) {
-        return;
-      }
-
-      await marcarComoCompleto(row.id);
-      concluidos++;
+      const resultado = await marcarComoCompletoSemLock(agendamento, true);
+      return resultado !== null;
     });
+
+    if (concluiu) {
+      concluidos++;
+    }
   }
 
   return concluidos;
@@ -349,6 +416,11 @@ export async function concluirAgendamentosPassados(): Promise<number> {
 export async function reagendarAgendamento(agendamentoId: number, novaDataHora: Date) {
   return comLockDeAgendamento(agendamentoId, async () => {
     const agendamento = await buscarPorId(agendamentoId);
+
+    if (!['agendado', 'confirmado'].includes(agendamento.status)) {
+      throw new AppError('Só é possível reagendar agendamentos ativos');
+    }
+
     const duracaoMinutos = agendamento.duracao_minutos;
 
     const profissionalId = await obterProfissionalDisponivel(
@@ -377,21 +449,40 @@ export async function reagendarAgendamento(agendamentoId: number, novaDataHora: 
         );
       }
 
-      await pool.query(
-        `UPDATE agendamentos
-         SET data_hora = $1,
-             profissional_id = $2,
-             lembrete_enviado = false
-         WHERE id = $3`,
-        [novaDataHora, profissionalId, agendamentoId],
-      );
+      return withTransaction(async (client) => {
+        try {
+          const { rows } = await client.query(
+            `UPDATE agendamentos
+             SET data_hora = $1,
+                 profissional_id = $2,
+                 lembrete_enviado = false
+             WHERE id = $3 AND status = $4
+             RETURNING *`,
+            [novaDataHora, profissionalId, agendamentoId, agendamento.status],
+          );
 
-      await registrarHistorico(
-        agendamentoId,
-        agendamento.status,
-        agendamento.status,
-        agendamento.data_hora,
-      );
+          if (rows.length === 0) {
+            throw new AppError('Agendamento foi alterado por outra operação');
+          }
+        } catch (error) {
+          if (ehViolacaoDeConstraintUnica(error) && error.code === '23505') {
+            throw new AppError(
+              'Já existe um agendamento nesse exato horário para esse profissional',
+            );
+          }
+          throw error;
+        }
+
+        await registrarHistoricoNaTransacao(
+          client,
+          agendamentoId,
+          agendamento.status,
+          agendamento.status,
+          agendamento.data_hora,
+        );
+
+        return true;
+      });
     });
   });
 }
@@ -404,15 +495,15 @@ async function validarConflitoDeHorario(
 ) {
   const { rows } = await pool.query(
     `SELECT 1
-   FROM agendamentos a
-   WHERE a.profissional_id = $1
-     AND a.id <> $2
-     AND a.status IN ('agendado', 'confirmado')
-     AND a.data_hora <
-         $3::timestamptz + make_interval(mins => $4::integer)
-     AND a.data_hora +
-         make_interval(mins => a.duracao_minutos) > $3::timestamptz
-   LIMIT 1`,
+     FROM agendamentos a
+     WHERE a.profissional_id = $1
+       AND a.id <> $2
+       AND a.status IN ('agendado', 'confirmado')
+       AND a.data_hora <
+           $3::timestamptz + make_interval(mins => $4::integer)
+       AND a.data_hora +
+           make_interval(mins => a.duracao_minutos) > $3::timestamptz
+     LIMIT 1`,
     [profissionalId, agendamentoId, novaDataHora, duracaoMinutos],
   );
 
@@ -425,6 +516,10 @@ export async function reagendarComoAdmin(agendamentoId: number, novaDataHora: Da
   return comLockDeAgendamento(agendamentoId, async () => {
     const agendamento = await buscarPorId(agendamentoId);
 
+    if (!['agendado', 'confirmado'].includes(agendamento.status)) {
+      throw new AppError('Só é possível reagendar agendamentos ativos');
+    }
+
     return comLockDeProfissional(agendamento.profissional_id, async () => {
       await validarConflitoDeHorario(
         agendamento.profissional_id,
@@ -433,39 +528,49 @@ export async function reagendarComoAdmin(agendamentoId: number, novaDataHora: Da
         agendamento.duracao_minutos,
       );
 
-      try {
-        await pool.query(
-          `UPDATE agendamentos
+      return withTransaction(async (client) => {
+        try {
+          const { rows } = await client.query(
+            `UPDATE agendamentos
              SET data_hora = $1,
                  lembrete_enviado = false
-             WHERE id = $2`,
-          [novaDataHora, agendamentoId],
-        );
-      } catch (error) {
-        if (ehViolacaoDeConstraintUnica(error) && error.code === '23505') {
-          throw new AppError('Já existe um agendamento nesse exato horário para esse profissional');
+             WHERE id = $2 AND status = $3
+             RETURNING *`,
+            [novaDataHora, agendamentoId, agendamento.status],
+          );
+
+          if (rows.length === 0) {
+            throw new AppError('Agendamento foi alterado por outra operação');
+          }
+        } catch (error) {
+          if (ehViolacaoDeConstraintUnica(error) && error.code === '23505') {
+            throw new AppError(
+              'Já existe um agendamento nesse exato horário para esse profissional',
+            );
+          }
+          throw error;
         }
 
-        throw error;
-      }
-
-      await registrarHistorico(
-        agendamentoId,
-        agendamento.status,
-        agendamento.status,
-        agendamento.data_hora,
-      );
+        await registrarHistoricoNaTransacao(
+          client,
+          agendamentoId,
+          agendamento.status,
+          agendamento.status,
+          agendamento.data_hora,
+        );
+      });
     });
   });
 }
 
-async function registrarHistorico(
+async function registrarHistoricoNaTransacao(
+  client: import('pg').PoolClient,
   agendamentoId: number,
-  statusAnterior: string,
-  statusNovo: string,
+  statusAnterior: StatusAgendamento,
+  statusNovo: StatusAgendamento,
   dataHoraAnterior?: string,
 ) {
-  await pool.query(
+  await client.query(
     `INSERT INTO historico_agendamentos
        (agendamento_id, status_anterior, status_novo, data_hora_anterior)
      VALUES ($1, $2, $3, $4)`,
