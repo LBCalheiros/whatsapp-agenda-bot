@@ -1,6 +1,7 @@
 import { AppError } from '@/infra/errors';
 import { logger } from '@/infra/logger';
 import { obterSessaoAtual } from '@/infra/autenticacaoMiddleware';
+import { resolverProfissionalAutorizado } from '@/infra/autorizacaoProfissional';
 import { validar } from '@/infra/validacao';
 import { obterProfissionalPadrao } from '@/models/disponibilidade';
 import { atualizarAntecedenciaMinima, buscarAntecedenciaMinima } from '@/models/profissional';
@@ -21,10 +22,11 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const profissionalIdParam = searchParams.get('profissionalId');
 
-    const profissionalId =
-      sessao.role === 'gerente' && profissionalIdParam
-        ? Number(profissionalIdParam)
-        : await obterProfissionalPadrao();
+    const profissionalId = resolverProfissionalAutorizado(
+      sessao,
+      profissionalIdParam ? Number(profissionalIdParam) : undefined,
+      await obterProfissionalPadrao(),
+    );
 
     const antecedenciaMinimaHoras = await buscarAntecedenciaMinima(profissionalId);
     // devolve profissionalId sempre, pra tela saber qual está selecionado por

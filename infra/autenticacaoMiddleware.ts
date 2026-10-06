@@ -9,17 +9,20 @@ export async function obterSessaoAtual() {
   const payload = verificarTokenSessao(token);
   if (!payload) return null;
 
-  // confere se o token ainda é a versão vigente pro usuário — logout, troca de senha,
-  // mudança de papel ou desativação incrementam `versao_token`, o que derruba na
-  // hora qualquer token emitido antes, mesmo que a assinatura ainda esteja válida
   const { rows } = await pool.query(
-    `SELECT versao_token, ativo FROM usuarios_admin WHERE id = $1`,
+    `SELECT versao_token, profissional_id, role
+   FROM usuarios_admin
+   WHERE id = $1`,
     [payload.usuarioId],
   );
 
-  if (rows.length === 0 || rows[0].versao_token !== payload.versaoToken || !rows[0].ativo) {
+  if (rows.length === 0 || rows[0].versao_token !== payload.versaoToken) {
     return null;
   }
 
-  return payload;
+  return {
+    ...payload,
+    role: rows[0].role,
+    profissionalId: rows[0].profissional_id,
+  };
 }

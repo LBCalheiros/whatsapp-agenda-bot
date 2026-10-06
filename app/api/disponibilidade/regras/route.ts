@@ -1,6 +1,7 @@
 import { AppError } from '@/infra/errors';
 import { logger } from '@/infra/logger';
 import { obterSessaoAtual } from '@/infra/autenticacaoMiddleware';
+import { resolverProfissionalAutorizado } from '@/infra/autorizacaoProfissional';
 import { validar } from '@/infra/validacao';
 import {
   listarRegras,
@@ -27,12 +28,11 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const profissionalIdParam = searchParams.get('profissionalId');
 
-    // escolher outro profissional além do padrão é privilégio de gerente;
-    // se um funcionário mandar esse param, ele é simplesmente ignorado
-    const profissionalId =
-      sessao.role === 'gerente' && profissionalIdParam
-        ? Number(profissionalIdParam)
-        : await obterProfissionalPadrao();
+    const profissionalId = resolverProfissionalAutorizado(
+      sessao,
+      profissionalIdParam ? Number(profissionalIdParam) : undefined,
+      await obterProfissionalPadrao(),
+    );
 
     const regras = await listarRegras(profissionalId);
     return Response.json(regras);
@@ -40,6 +40,7 @@ export async function GET(request: Request) {
     if (error instanceof AppError) {
       return Response.json({ error: error.message }, { status: error.statusCode });
     }
+
     logger.error({ error }, 'Erro inesperado');
     return Response.json({ error: 'Erro interno' }, { status: 500 });
   }
@@ -55,10 +56,11 @@ export async function PUT(request: Request) {
     const body = await request.json();
     const dados = validar(schemaUpsertRegra, body);
 
-    const profissionalId =
-      sessao.role === 'gerente' && dados.profissionalId
-        ? dados.profissionalId
-        : await obterProfissionalPadrao();
+    const profissionalId = resolverProfissionalAutorizado(
+      sessao,
+      dados.profissionalId,
+      await obterProfissionalPadrao(),
+    );
 
     const regra = await upsertRegraDisponibilidade({
       profissionalId,
@@ -73,6 +75,7 @@ export async function PUT(request: Request) {
     if (error instanceof AppError) {
       return Response.json({ error: error.message }, { status: error.statusCode });
     }
+
     logger.error({ error }, 'Erro inesperado');
     return Response.json({ error: 'Erro interno' }, { status: 500 });
   }

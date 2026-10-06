@@ -2,6 +2,7 @@ import { AppError } from '@/infra/errors';
 import { logger } from '@/infra/logger';
 import { obterSessaoAtual } from '@/infra/autenticacaoMiddleware';
 import { obterProfissionalPadrao, removerRegraDisponibilidade } from '@/models/disponibilidade';
+import { resolverProfissionalAutorizado } from '@/infra/autorizacaoProfissional';
 
 export async function DELETE(
   request: Request,
@@ -17,10 +18,11 @@ export async function DELETE(
     const { searchParams } = new URL(request.url);
     const profissionalIdParam = searchParams.get('profissionalId');
 
-    const profissionalId =
-      sessao.role === 'gerente' && profissionalIdParam
-        ? Number(profissionalIdParam)
-        : await obterProfissionalPadrao();
+    const profissionalId = resolverProfissionalAutorizado(
+      sessao,
+      profissionalIdParam ? Number(profissionalIdParam) : undefined,
+      await obterProfissionalPadrao(),
+    );
 
     await removerRegraDisponibilidade(profissionalId, Number(diaSemana));
     return Response.json({ ok: true });

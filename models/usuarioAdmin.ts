@@ -282,3 +282,22 @@ export async function excluirFuncionarioPorId(id: number, idDoGerenteLogado: num
 
   await pool.query(`DELETE FROM usuarios_admin WHERE id = $1`, [id]);
 }
+
+export async function atualizarTelefoneNotificacao(
+  email: string,
+  telefoneNotificacao: string | null,
+): Promise<UsuarioAdmin> {
+  const { rows } = await pool.query(
+    `UPDATE usuarios_admin
+     SET telefone_notificacao = $1
+     WHERE email = $2
+     RETURNING id, email, role, telefone_notificacao, criado_em`,
+    [telefoneNotificacao, email],
+  );
+
+  if (rows.length === 0) {
+    throw new AppError('Usuário não encontrado', 404);
+  }
+
+  return rows[0];
+}

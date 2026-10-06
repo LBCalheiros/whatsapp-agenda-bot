@@ -1,6 +1,7 @@
 import { AppError } from '@/infra/errors';
 import { logger } from '@/infra/logger';
 import { obterSessaoAtual } from '@/infra/autenticacaoMiddleware';
+import { resolverProfissionalAutorizado } from '@/infra/autorizacaoProfissional';
 import { validar } from '@/infra/validacao';
 import { criarBloqueio, listarBloqueios, obterProfissionalPadrao } from '@/models/disponibilidade';
 import { z } from 'zod';
@@ -22,10 +23,11 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const profissionalIdParam = searchParams.get('profissionalId');
 
-    const profissionalId =
-      sessao.role === 'gerente' && profissionalIdParam
-        ? Number(profissionalIdParam)
-        : await obterProfissionalPadrao();
+    const profissionalId = resolverProfissionalAutorizado(
+      sessao,
+      profissionalIdParam ? Number(profissionalIdParam) : undefined,
+      await obterProfissionalPadrao(),
+    );
 
     const bloqueios = await listarBloqueios(profissionalId);
     return Response.json(bloqueios);
@@ -33,6 +35,7 @@ export async function GET(request: Request) {
     if (error instanceof AppError) {
       return Response.json({ error: error.message }, { status: error.statusCode });
     }
+
     logger.error({ error }, 'Erro inesperado');
     return Response.json({ error: 'Erro interno' }, { status: 500 });
   }
@@ -48,10 +51,11 @@ export async function POST(request: Request) {
     const body = await request.json();
     const dados = validar(schemaCriarBloqueio, body);
 
-    const profissionalId =
-      sessao.role === 'gerente' && dados.profissionalId
-        ? dados.profissionalId
-        : await obterProfissionalPadrao();
+    const profissionalId = resolverProfissionalAutorizado(
+      sessao,
+      dados.profissionalId,
+      await obterProfissionalPadrao(),
+    );
 
     const bloqueio = await criarBloqueio({
       profissionalId,
@@ -65,6 +69,7 @@ export async function POST(request: Request) {
     if (error instanceof AppError) {
       return Response.json({ error: error.message }, { status: error.statusCode });
     }
+
     logger.error({ error }, 'Erro inesperado');
     return Response.json({ error: 'Erro interno' }, { status: 500 });
   }

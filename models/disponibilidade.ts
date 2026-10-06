@@ -123,10 +123,13 @@ export async function listarBloqueios(profissionalId: number) {
   return rows;
 }
 
-export async function removerBloqueio(bloqueioId: number) {
-  const { rowCount } = await pool.query(`DELETE FROM indisponibilidades WHERE id = $1`, [
-    bloqueioId,
-  ]);
+export async function removerBloqueio(bloqueioId: number, profissionalId: number) {
+  const { rowCount } = await pool.query(
+    `DELETE FROM indisponibilidades
+     WHERE id = $1 AND profissional_id = $2`,
+    [bloqueioId, profissionalId],
+  );
+
   if (rowCount === 0) {
     throw new AppError('Bloqueio não encontrado', 404);
   }
