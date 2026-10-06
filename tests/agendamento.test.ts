@@ -7,21 +7,76 @@ import {
   reagendarAgendamento,
 } from '@/models/agendamento';
 import { paraHorarioLocal } from '@/infra/data';
+import { atualizarServico } from '@/models/servico';
 
 describe('models/agendamento (integração)', () => {
   let profissionalId: number;
   let servicoId: number;
   let clienteId: number;
   let servicoConflitoId: number;
+  let servicoSnapshotId: number;
+
+  it('mantém duração e preço do agendamento mesmo após alteração do serviço', async () => {
+    const dataHora = dataFutura(240);
+
+    const agendamento = await criarAgendamento({
+      clienteId,
+      profissionalId,
+      servicoId: servicoSnapshotId,
+      dataHora,
+    });
+
+    expect(agendamento.duracao_minutos).toBe(30);
+    expect(Number(agendamento.preco)).toBe(50);
+
+    await atualizarServico(servicoSnapshotId, {
+      duracaoMinutos: 60,
+      preco: 80,
+    });
+
+    const { rows } = await pool.query(
+      `SELECT duracao_minutos, preco
+     FROM agendamentos
+     WHERE id = $1`,
+      [agendamento.id],
+    );
+
+    expect(rows[0].duracao_minutos).toBe(30);
+    expect(Number(rows[0].preco)).toBe(50);
+
+    const { rows: servicos } = await pool.query(
+      `SELECT duracao_minutos, preco
+     FROM servicos
+     WHERE id = $1`,
+      [servicoSnapshotId],
+    );
+
+    expect(servicos[0].duracao_minutos).toBe(60);
+    expect(Number(servicos[0].preco)).toBe(80);
+  });
 
   beforeAll(async () => {
     const profissional = await pool.query(
       `INSERT INTO profissionais (nome, telefone_contato, ativo)
-       VALUES ('Teste Jest', '5511900000000', true)
-       RETURNING id`,
+     VALUES ('Teste Jest', '5511900000000', true)
+     RETURNING id`,
     );
 
     profissionalId = profissional.rows[0].id;
+
+    const servicoSnapshot = await pool.query(
+      `INSERT INTO servicos (nome, duracao_minutos, preco, ativo)
+     VALUES ('Serviço Snapshot Jest', 30, 50, true)
+     RETURNING id`,
+    );
+
+    servicoSnapshotId = servicoSnapshot.rows[0].id;
+
+    await pool.query(
+      `INSERT INTO profissional_servicos (profissional_id, servico_id)
+   VALUES ($1, $2)`,
+      [profissionalId, servicoSnapshotId],
+    );
 
     const servicoConflito = await pool.query(
       `INSERT INTO servicos (nome, duracao_minutos, preco, ativo)
@@ -89,10 +144,9 @@ describe('models/agendamento (integração)', () => {
     ]);
 
     await pool.query(`DELETE FROM clientes WHERE id = $1`, [clienteId]);
-
     await pool.query(`DELETE FROM servicos WHERE id = $1`, [servicoId]);
     await pool.query(`DELETE FROM servicos WHERE id = $1`, [servicoConflitoId]);
-
+    await pool.query(`DELETE FROM servicos WHERE id = $1`, [servicoSnapshotId]);
     await pool.query(`DELETE FROM profissionais WHERE id = $1`, [profissionalId]);
 
     await pool.end();

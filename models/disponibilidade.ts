@@ -191,10 +191,11 @@ export async function consultarHorariosDisponiveis(
   const fimDia = paraInstanteReal(fimDiaLocal);
 
   const { rows: ocupados } = await pool.query(
-    `SELECT a.data_hora, s.duracao_minutos
-     FROM agendamentos a
-     JOIN servicos s ON s.id = a.servico_id
-     WHERE a.profissional_id = $1 AND a.data_hora BETWEEN $2 AND $3 AND a.status != 'cancelado'`,
+    `SELECT a.data_hora, a.duracao_minutos
+   FROM agendamentos a
+   WHERE a.profissional_id = $1
+     AND a.data_hora BETWEEN $2 AND $3
+     AND a.status != 'cancelado'`,
     [profissionalId, inicioDia, fimDia],
   );
 

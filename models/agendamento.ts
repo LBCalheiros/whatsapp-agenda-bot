@@ -14,6 +14,8 @@ type Agendamento = {
   status: string;
   lembrete_enviado: boolean;
   observacoes: string | null;
+  duracao_minutos: number;
+  preco: string | null;
 };
 
 export const ANTECEDENCIA_MINIMA_HORAS = 2;
@@ -42,7 +44,9 @@ export async function criarAgendamento(input: {
     }
 
     const { rows: servicos } = await pool.query(
-      `SELECT duracao_minutos FROM servicos WHERE id = $1 AND ativo = true`,
+      `SELECT duracao_minutos, preco
+   FROM servicos
+   WHERE id = $1 AND ativo = true`,
       [servicoId],
     );
     if (servicos.length === 0) {
@@ -50,6 +54,7 @@ export async function criarAgendamento(input: {
     }
 
     const duracaoMinutos = servicos[0].duracao_minutos;
+    const preco = servicos[0].preco;
 
     await validarHorarioDisponivel(profissionalId, dataHora, duracaoMinutos);
 
@@ -59,10 +64,11 @@ export async function criarAgendamento(input: {
 
     try {
       const { rows } = await pool.query(
-        `INSERT INTO agendamentos (cliente_id, profissional_id, servico_id, data_hora)
-         VALUES ($1, $2, $3, $4)
-         RETURNING *`,
-        [clienteId, profissionalId, servicoId, dataHora],
+        `INSERT INTO agendamentos
+   (cliente_id, profissional_id, servico_id, data_hora, duracao_minutos, preco)
+   VALUES ($1, $2, $3, $4, $5, $6)
+   RETURNING *`,
+        [clienteId, profissionalId, servicoId, dataHora, duracaoMinutos, preco],
       );
 
       return rows[0] as Agendamento;
@@ -141,14 +147,15 @@ export async function listarAgendamentos(filtros: {
 
   const { rows } = await pool.query(
     `SELECT
-       a.*,
-       c.nome AS cliente_nome, c.telefone AS cliente_telefone,
-       p.nome AS profissional_nome,
-       s.nome AS servico_nome, s.duracao_minutos
-     FROM agendamentos a
-     JOIN clientes c ON c.id = a.cliente_id
-     JOIN profissionais p ON p.id = a.profissional_id
-     JOIN servicos s ON s.id = a.servico_id
+      a.*,
+      c.nome AS cliente_nome,
+      c.telefone AS cliente_telefone,
+      p.nome AS profissional_nome,
+      s.nome AS servico_nome
+    FROM agendamentos a
+    JOIN clientes c ON c.id = a.cliente_id
+    JOIN profissionais p ON p.id = a.profissional_id
+    JOIN servicos s ON s.id = a.servico_id
      ${where}
      ORDER BY ${ordem}`,
     valores,
@@ -170,13 +177,13 @@ export async function calcularReceita(filtros: { dataInicio?: Date; dataFim?: Da
 
   const { rows } = await pool.query(
     `SELECT
-       s.id AS servico_id,
-       s.nome AS servico_nome,
-       COUNT(*)::int AS quantidade,
-       COALESCE(SUM(s.preco), 0) AS total,
-       COUNT(*) FILTER (WHERE s.preco IS NULL)::int AS sem_preco
-     FROM agendamentos a
-     JOIN servicos s ON s.id = a.servico_id
+      s.id AS servico_id,
+     s.nome AS servico_nome,
+     COUNT(*)::int AS quantidade,
+     COALESCE(SUM(a.preco), 0) AS total,
+     COUNT(*) FILTER (WHERE a.preco IS NULL)::int AS sem_preco
+    FROM agendamentos a
+    JOIN servicos s ON s.id = a.servico_id
      WHERE ${condicoes.join(' AND ')}
      GROUP BY s.id, s.nome
      ORDER BY total DESC`,
@@ -258,10 +265,9 @@ export async function marcarComoCompleto(agendamentoId: number) {
 export async function concluirAgendamentosPassados(): Promise<number> {
   const { rows } = await pool.query(
     `SELECT a.id
-     FROM agendamentos a
-     JOIN servicos s ON s.id = a.servico_id
-     WHERE a.status IN ('agendado', 'confirmado')
-       AND (a.data_hora + (s.duracao_minutos || ' minutes')::interval) < now()`,
+   FROM agendamentos a
+   WHERE a.status IN ('agendado', 'confirmado')
+     AND (a.data_hora + (a.duracao_minutos || ' minutes')::interval) < now()`,
   );
 
   for (const row of rows) {
@@ -271,18 +277,10 @@ export async function concluirAgendamentosPassados(): Promise<number> {
   return rows.length;
 }
 
-// Sem apego a nenhum profissional específico: resolve do zero quem está
-// disponível pro mesmo serviço no novo horário, exatamente como um
-// agendamento novo. Não existe "tentar manter o original" — é sempre
-// "qualquer um que atenda o serviço e esteja livre nesse horário".
 export async function reagendarAgendamento(agendamentoId: number, novaDataHora: Date) {
   const agendamento = await buscarPorId(agendamentoId);
 
-  const { rows: servicos } = await pool.query(
-    `SELECT duracao_minutos FROM servicos WHERE id = $1`,
-    [agendamento.servico_id],
-  );
-  const duracaoMinutos = servicos[0].duracao_minutos;
+  const duracaoMinutos = agendamento.duracao_minutos;
 
   const profissionalId = await obterProfissionalDisponivel(
     agendamento.servico_id,
