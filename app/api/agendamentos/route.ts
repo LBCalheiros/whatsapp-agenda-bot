@@ -44,6 +44,7 @@ const schemaListarAgendamentos = z.object({
   dataFim: schemaData(),
   status: z.enum(STATUS_AGENDAMENTO).optional(),
   apenasFuturos: schemaBooleanQuery(),
+  incluirAtivosPassados: schemaBooleanQuery(),
   historico: schemaBooleanQuery(),
 });
 
@@ -72,6 +73,7 @@ export async function GET(request: Request) {
       dataFim: dados.dataFim,
       status: dados.status,
       apenasFuturos: dados.apenasFuturos,
+      incluirAtivosPassados: dados.incluirAtivosPassados,
       historico: dados.historico,
     });
 

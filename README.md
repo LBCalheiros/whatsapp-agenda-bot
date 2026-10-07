@@ -176,12 +176,11 @@ Existem rotas protegidas por `CRON_SECRET` para tarefas automáticas:
 
 ```text
 /api/cron/lembretes
-/api/cron/manutencao
 ```
 
 O cron de lembretes procura agendamentos que precisam receber o lembrete e evita envio duplicado.
 
-O cron de manutenção conclui automaticamente agendamentos cujo horário já terminou, usando a duração armazenada como snapshot no próprio agendamento.
+Não há conclusão automática: agendamentos ativos cujo horário passou continuam na aba Próximos até serem marcados manualmente como concluídos ou como não compareceu.
 
 Em produção, essas rotas podem ser executadas por um scheduler externo, como o Vercel Cron configurado no projeto.
 

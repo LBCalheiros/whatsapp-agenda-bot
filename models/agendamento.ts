@@ -24,10 +24,8 @@ type Agendamento = {
 export const ANTECEDENCIA_MINIMA_HORAS = 2;
 const DIAS_HISTORICO = 30;
 
-function ehViolacaoDeConstraintUnica(error: unknown): error is { code: string } {
-  return (
-    typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
-  );
+function ehViolacaoDeUnicidade(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
 }
 
 export async function criarAgendamento(input: {
@@ -82,7 +80,7 @@ export async function criarAgendamento(input: {
 
       return rows[0] as Agendamento;
     } catch (error) {
-      if (ehViolacaoDeConstraintUnica(error) && error.code === '23505') {
+      if (ehViolacaoDeUnicidade(error)) {
         throw new AppError('Esse horário acabou de ser ocupado, escolha outro');
       }
 
@@ -100,6 +98,7 @@ export async function listarAgendamentos(filtros: {
   dataFim?: Date;
   status?: string;
   apenasFuturos?: boolean;
+  incluirAtivosPassados?: boolean;
   historico?: boolean;
 }) {
   const condicoes: string[] = [];
@@ -132,7 +131,15 @@ export async function listarAgendamentos(filtros: {
 
   if (filtros.apenasFuturos) {
     valores.push(new Date());
-    condicoes.push(`a.data_hora >= $${valores.length} AND a.status != 'cancelado'`);
+    const futuro = `(a.data_hora >= $${valores.length} AND a.status != 'cancelado')`;
+
+    // agendamentos ativos cujo horário já passou continuam listados até alguém
+    // marcá-los como concluído ou não compareceu
+    condicoes.push(
+      filtros.incluirAtivosPassados
+        ? `(${futuro} OR a.status IN ('agendado', 'confirmado'))`
+        : futuro,
+    );
   }
 
   if (filtros.historico) {
@@ -145,7 +152,7 @@ export async function listarAgendamentos(filtros: {
     const iAgora = valores.length;
 
     condicoes.push(`(
-      (a.status = 'completo' AND a.data_hora BETWEEN $${iLimite} AND $${iAgora})
+      (a.status IN ('completo', 'nao_compareceu') AND a.data_hora BETWEEN $${iLimite} AND $${iAgora})
       OR (a.status = 'cancelado' AND EXISTS (
         SELECT 1
         FROM historico_agendamentos h
@@ -330,40 +337,30 @@ export async function cancelarComoCliente(agendamentoId: number) {
   });
 }
 
-async function marcarComoCompletoSemLock(
+async function mudarStatusSemLock(
   agendamento: Agendamento,
-  somenteSeJaTerminou: boolean,
-): Promise<Agendamento | null> {
-  if (agendamento.status === 'completo') {
+  statusNovo: 'completo' | 'nao_compareceu',
+): Promise<Agendamento> {
+  if (agendamento.status === statusNovo) {
     return agendamento;
   }
 
-  validarTransicaoStatus(agendamento.status, 'completo');
-
-  if (somenteSeJaTerminou) {
-    const fim = new Date(
-      new Date(agendamento.data_hora).getTime() + agendamento.duracao_minutos * 60_000,
-    );
-
-    if (fim >= new Date()) {
-      return null;
-    }
-  }
+  validarTransicaoStatus(agendamento.status, statusNovo);
 
   return withTransaction(async (client) => {
     const { rows } = await client.query(
       `UPDATE agendamentos
-       SET status = 'completo'
+       SET status = $3
        WHERE id = $1 AND status = $2
        RETURNING *`,
-      [agendamento.id, agendamento.status],
+      [agendamento.id, agendamento.status, statusNovo],
     );
 
     if (rows.length === 0) {
       throw new AppError('Agendamento foi alterado por outra operação');
     }
 
-    await registrarHistoricoNaTransacao(client, agendamento.id, agendamento.status, 'completo');
+    await registrarHistoricoNaTransacao(client, agendamento.id, agendamento.status, statusNovo);
 
     return rows[0] as Agendamento;
   });
@@ -372,45 +369,24 @@ async function marcarComoCompletoSemLock(
 export async function marcarComoCompleto(agendamentoId: number): Promise<Agendamento> {
   return comLockDeAgendamento(agendamentoId, async () => {
     const agendamento = await buscarPorId(agendamentoId);
-    const resultado = await marcarComoCompletoSemLock(agendamento, false);
-    if (!resultado) {
-      throw new AppError('Não foi possível concluir o agendamento');
-    }
-    return resultado;
+    return mudarStatusSemLock(agendamento, 'completo');
   });
 }
 
-export async function concluirAgendamentosPassados(): Promise<number> {
-  const { rows } = await pool.query(
-    `SELECT a.id
-     FROM agendamentos a
-     WHERE a.status IN ('agendado', 'confirmado')
-       AND (
-         a.data_hora +
-         make_interval(mins => a.duracao_minutos)
-       ) < now()`,
-  );
+export async function marcarComoNaoCompareceu(agendamentoId: number): Promise<Agendamento> {
+  return comLockDeAgendamento(agendamentoId, async () => {
+    const agendamento = await buscarPorId(agendamentoId);
 
-  let concluidos = 0;
-
-  for (const row of rows) {
-    const concluiu = await comLockDeAgendamento(row.id, async () => {
-      const agendamento = await buscarPorId(row.id);
-
-      if (!['agendado', 'confirmado'].includes(agendamento.status)) {
-        return false;
-      }
-
-      const resultado = await marcarComoCompletoSemLock(agendamento, true);
-      return resultado !== null;
-    });
-
-    if (concluiu) {
-      concluidos++;
+    if (agendamento.status === 'nao_compareceu') {
+      return agendamento;
     }
-  }
 
-  return concluidos;
+    if (new Date(agendamento.data_hora).getTime() > Date.now()) {
+      throw new AppError('Só é possível marcar não comparecimento depois do horário agendado');
+    }
+
+    return mudarStatusSemLock(agendamento, 'nao_compareceu');
+  });
 }
 
 export async function reagendarAgendamento(agendamentoId: number, novaDataHora: Date) {
@@ -465,7 +441,7 @@ export async function reagendarAgendamento(agendamentoId: number, novaDataHora: 
             throw new AppError('Agendamento foi alterado por outra operação');
           }
         } catch (error) {
-          if (ehViolacaoDeConstraintUnica(error) && error.code === '23505') {
+          if (ehViolacaoDeUnicidade(error)) {
             throw new AppError(
               'Já existe um agendamento nesse exato horário para esse profissional',
             );
@@ -543,7 +519,7 @@ export async function reagendarComoAdmin(agendamentoId: number, novaDataHora: Da
             throw new AppError('Agendamento foi alterado por outra operação');
           }
         } catch (error) {
-          if (ehViolacaoDeConstraintUnica(error) && error.code === '23505') {
+          if (ehViolacaoDeUnicidade(error)) {
             throw new AppError(
               'Já existe um agendamento nesse exato horário para esse profissional',
             );

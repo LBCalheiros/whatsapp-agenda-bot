@@ -8,7 +8,8 @@ import {
   reagendarAgendamento,
   reagendarComoAdmin,
   marcarComoCompleto,
-  concluirAgendamentosPassados,
+  marcarComoNaoCompareceu,
+  listarAgendamentos,
 } from '@/models/agendamento';
 import { paraHorarioLocal } from '@/infra/data';
 import { atualizarServico } from '@/models/servico';
@@ -449,97 +450,100 @@ describe('models/agendamento (integração)', () => {
     });
   });
 
-  it('não conclui um agendamento antes do fim da duração', async () => {
-    const inicio = new Date(Date.now() - 5 * 60 * 1000);
-    const agendamento = await pool.query(
+  async function inserirAgendamentoPassado(minutosAtras: number): Promise<number> {
+    const inicio = new Date(Date.now() - minutosAtras * 60 * 1000);
+    const { rows } = await pool.query(
       `INSERT INTO agendamentos
        (cliente_id, profissional_id, servico_id, data_hora, duracao_minutos, preco)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id`,
       [clienteId, profissionalId, servicoId, inicio, 30, 50],
     );
+    return rows[0].id;
+  }
 
-    await concluirAgendamentosPassados();
+  async function limparAgendamento(id: number) {
+    await pool.query(`DELETE FROM historico_agendamentos WHERE agendamento_id = $1`, [id]);
+    await pool.query(`DELETE FROM agendamentos WHERE id = $1`, [id]);
+  }
 
-    const atual = await pool.query(`SELECT status FROM agendamentos WHERE id = $1`, [
-      agendamento.rows[0].id,
+  it('marca como não compareceu depois do horário e registra histórico', async () => {
+    const id = await inserirAgendamentoPassado(10);
+
+    const resultado = await marcarComoNaoCompareceu(id);
+
+    expect(resultado.status).toBe('nao_compareceu');
+
+    const historico = await pool.query(
+      `SELECT status_anterior, status_novo FROM historico_agendamentos WHERE agendamento_id = $1`,
+      [id],
+    );
+    expect(historico.rows).toEqual([
+      { status_anterior: 'agendado', status_novo: 'nao_compareceu' },
     ]);
-    expect(atual.rows[0].status).toBe('agendado');
 
-    await pool.query(`DELETE FROM agendamentos WHERE id = $1`, [agendamento.rows[0].id]);
+    await limparAgendamento(id);
   });
 
-  it('não repete histórico ao executar a conclusão automática duas vezes', async () => {
-    const inicio = new Date(Date.now() - 60 * 60 * 1000);
-    const agendamento = await pool.query(
-      `INSERT INTO agendamentos
-       (cliente_id, profissional_id, servico_id, data_hora, duracao_minutos, preco)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id`,
-      [clienteId, profissionalId, servicoId, inicio, 30, 50],
-    );
+  it('não permite marcar não compareceu antes do horário', async () => {
+    const agendamento = await criarAgendamento({
+      clienteId,
+      profissionalId,
+      servicoId,
+      dataHora: dataFutura(120),
+    });
 
-    await concluirAgendamentosPassados();
-    const historicoDepoisPrimeiraExecucao = await pool.query(
-      `SELECT COUNT(*)::int AS total
-       FROM historico_agendamentos
-       WHERE agendamento_id = $1`,
-      [agendamento.rows[0].id],
-    );
-
-    await concluirAgendamentosPassados();
-    const historicoDepoisSegundaExecucao = await pool.query(
-      `SELECT COUNT(*)::int AS total
-       FROM historico_agendamentos
-       WHERE agendamento_id = $1`,
-      [agendamento.rows[0].id],
-    );
-
-    const atual = await pool.query(`SELECT status FROM agendamentos WHERE id = $1`, [
-      agendamento.rows[0].id,
-    ]);
-
-    expect(atual.rows[0].status).toBe('completo');
-    expect(historicoDepoisPrimeiraExecucao.rows[0].total).toBe(1);
-    expect(historicoDepoisSegundaExecucao.rows[0].total).toBe(1);
-
-    await pool.query(`DELETE FROM historico_agendamentos WHERE agendamento_id = $1`, [
-      agendamento.rows[0].id,
-    ]);
-    await pool.query(`DELETE FROM agendamentos WHERE id = $1`, [agendamento.rows[0].id]);
+    await expect(marcarComoNaoCompareceu(agendamento.id)).rejects.toMatchObject({
+      message: expect.stringContaining('depois do horário'),
+    });
   });
 
-  it('conclui automaticamente agendamento usando a duração do snapshot', async () => {
-    const servicoSnapshot = await pool.query(
-      `INSERT INTO servicos (nome, duracao_minutos, preco, ativo)
-       VALUES ('Serviço snapshot conclusão Jest', 120, 80, true)
-       RETURNING id`,
+  it('não repete histórico ao marcar não compareceu duas vezes', async () => {
+    const id = await inserirAgendamentoPassado(10);
+
+    await marcarComoNaoCompareceu(id);
+    await marcarComoNaoCompareceu(id);
+
+    const historico = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM historico_agendamentos WHERE agendamento_id = $1`,
+      [id],
     );
-    const servicoSnapshotId = servicoSnapshot.rows[0].id;
+    expect(historico.rows[0].total).toBe(1);
 
-    const inicio = new Date(Date.now() - 45 * 60 * 1000);
-    const agendamento = await pool.query(
-      `INSERT INTO agendamentos
-       (cliente_id, profissional_id, servico_id, data_hora, duracao_minutos, preco)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id`,
-      [clienteId, profissionalId, servicoSnapshotId, inicio, 30, 80],
-    );
+    await limparAgendamento(id);
+  });
 
-    const concluidos = await concluirAgendamentosPassados();
+  it('não permite marcar não compareceu em agendamento cancelado ou concluído', async () => {
+    const cancelado = await inserirAgendamentoPassado(20);
+    await cancelarAgendamento(cancelado);
+    await expect(marcarComoNaoCompareceu(cancelado)).rejects.toMatchObject({
+      message: expect.stringContaining('cancelado'),
+    });
 
-    expect(concluidos).toBeGreaterThanOrEqual(1);
+    const concluido = await inserirAgendamentoPassado(30);
+    await marcarComoCompleto(concluido);
+    await expect(marcarComoNaoCompareceu(concluido)).rejects.toMatchObject({
+      message: expect.stringContaining('completo'),
+    });
 
-    const atual = await pool.query(`SELECT status FROM agendamentos WHERE id = $1`, [
-      agendamento.rows[0].id,
-    ]);
-    expect(atual.rows[0].status).toBe('completo');
+    await limparAgendamento(cancelado);
+    await limparAgendamento(concluido);
+  });
 
-    await pool.query(`DELETE FROM historico_agendamentos WHERE agendamento_id = $1`, [
-      agendamento.rows[0].id,
-    ]);
-    await pool.query(`DELETE FROM agendamentos WHERE id = $1`, [agendamento.rows[0].id]);
-    await pool.query(`DELETE FROM servicos WHERE id = $1`, [servicoSnapshotId]);
+  it('lista agendamento ativo já passado só com incluirAtivosPassados', async () => {
+    const id = await inserirAgendamentoPassado(60);
+
+    const semFlag = await listarAgendamentos({ apenasFuturos: true });
+    const comFlag = await listarAgendamentos({ apenasFuturos: true, incluirAtivosPassados: true });
+
+    expect(semFlag.some((a) => a.id === id)).toBe(false);
+    expect(comFlag.some((a) => a.id === id)).toBe(true);
+
+    await marcarComoNaoCompareceu(id);
+    const depois = await listarAgendamentos({ apenasFuturos: true, incluirAtivosPassados: true });
+    expect(depois.some((a) => a.id === id)).toBe(false);
+
+    await limparAgendamento(id);
   });
 });
 

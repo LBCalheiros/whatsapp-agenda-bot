@@ -3,6 +3,7 @@ import { obterSessaoAtual } from '@/infra/autenticacaoMiddleware';
 import { listarAgendamentos } from '@/models/agendamento';
 import { listarAtendimentos } from '@/models/atendimento';
 import { AppError } from '@/infra/errors';
+import { logger } from '@/infra/logger';
 import { fimDoDiaBRT } from '@/infra/data';
 
 const LIMITE_PROXIMOS_AGENDAMENTOS = 5;
@@ -43,6 +44,7 @@ export async function GET() {
     if (error instanceof AppError) {
       return NextResponse.json({ error: error.message }, { status: error.statusCode });
     }
-    throw error;
+    logger.error({ error }, 'Erro inesperado ao carregar o dashboard');
+    return NextResponse.json({ error: 'Erro interno' }, { status: 500 });
   }
 }

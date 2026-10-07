@@ -227,9 +227,9 @@ export default function AgendaPage() {
   const [periodo, setPeriodo] = useState<Periodo>('todos');
   const [filtroServicoId, setFiltroServicoId] = useState('');
   const [filtroCliente, setFiltroCliente] = useState(searchParams.get('cliente') ?? '');
-  const [filtroStatusHistorico, setFiltroStatusHistorico] = useState<'' | 'cancelado' | 'completo'>(
-    '',
-  );
+  const [filtroStatusHistorico, setFiltroStatusHistorico] = useState<
+    '' | 'cancelado' | 'completo' | 'nao_compareceu'
+  >('');
 
   const [selecionadoId, setSelecionadoId] = useState<number | null>(null);
   const [editandoNome, setEditandoNome] = useState(false);
@@ -261,6 +261,7 @@ export default function AgendaPage() {
     const params = new URLSearchParams();
     if (aba === 'proximos') {
       params.set('apenasFuturos', 'true');
+      params.set('incluirAtivosPassados', 'true');
     } else {
       params.set('historico', 'true');
       if (filtroStatusHistorico) params.set('status', filtroStatusHistorico);
@@ -366,6 +367,38 @@ export default function AgendaPage() {
     }
   }
 
+  async function concluir() {
+    if (!selecionado) return;
+    if (!confirm('Marcar este agendamento como concluído?')) return;
+
+    setErroAcao(null);
+    setSalvando(true);
+    try {
+      await apiFetch(`/api/agendamentos/${selecionado.id}/concluir`, { method: 'PATCH' });
+      forcarAtualizacao();
+    } catch (error) {
+      setErroAcao(error instanceof ApiError ? error.message : 'Erro inesperado');
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function naoCompareceu() {
+    if (!selecionado) return;
+    if (!confirm('Marcar este agendamento como não compareceu?')) return;
+
+    setErroAcao(null);
+    setSalvando(true);
+    try {
+      await apiFetch(`/api/agendamentos/${selecionado.id}/nao-compareceu`, { method: 'PATCH' });
+      forcarAtualizacao();
+    } catch (error) {
+      setErroAcao(error instanceof ApiError ? error.message : 'Erro inesperado');
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   async function cancelar() {
     if (!selecionado) return;
     if (!confirm('Cancelar este agendamento?')) return;
@@ -444,9 +477,10 @@ export default function AgendaPage() {
                 }
                 className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
               >
-                <option value="">Cancelados e concluídos</option>
+                <option value="">Todos</option>
                 <option value="cancelado">Só cancelados</option>
                 <option value="completo">Só concluídos</option>
+                <option value="nao_compareceu">Só não compareceu</option>
               </select>
             )}
             <select
@@ -618,11 +652,20 @@ export default function AgendaPage() {
                   </form>
                 </div>
 
-                {selecionado.status !== 'cancelado' && (
-                  <div className="mt-auto border-t border-gray-200 pt-3 dark:border-gray-700">
-                    <Button variante="secundario" onClick={cancelar} disabled={salvando}>
-                      Cancelar agendamento
+                {['agendado', 'confirmado'].includes(selecionado.status) && (
+                  <div className="mt-auto flex flex-wrap gap-2 border-t border-gray-200 pt-3 dark:border-gray-700">
+                    <Button onClick={concluir} disabled={salvando}>
+                      Marcar como concluído
                     </Button>
+                    {new Date(selecionado.data_hora) <= new Date() ? (
+                      <Button variante="secundario" onClick={naoCompareceu} disabled={salvando}>
+                        Não compareceu
+                      </Button>
+                    ) : (
+                      <Button variante="secundario" onClick={cancelar} disabled={salvando}>
+                        Cancelar agendamento
+                      </Button>
+                    )}
                   </div>
                 )}
               </>

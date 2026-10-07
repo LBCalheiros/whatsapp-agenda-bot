@@ -297,6 +297,13 @@ export default function DisponibilidadePage() {
     60000,
   );
 
+  // sem profissionalId a API usa o ativo de menor id; o select mostra esse mesmo
+  // profissional no lugar de uma opção "padrão" duplicada
+  const idProfissionalPadrao =
+    profissionaisEstado.status === 'sucesso' && profissionaisEstado.dados.length > 0
+      ? Math.min(...profissionaisEstado.dados.map((p) => p.id))
+      : null;
+
   const query = profissionalSelecionadoId ? `&profissionalId=${profissionalSelecionadoId}` : '';
 
   const regrasEstado = useApiPolling<Regra[]>(
@@ -372,14 +379,13 @@ export default function DisponibilidadePage() {
           <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
             Editando disponibilidade de
             <select
-              value={profissionalSelecionadoId ?? ''}
+              value={profissionalSelecionadoId ?? idProfissionalPadrao ?? ''}
               onChange={(e) => {
                 setProfissionalSelecionadoId(e.target.value ? Number(e.target.value) : null);
                 forcarAtualizacao();
               }}
               className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
             >
-              <option value="">Profissional padrão</option>
               {profissionaisEstado.dados.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.nome}
