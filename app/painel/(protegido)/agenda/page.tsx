@@ -654,13 +654,15 @@ export default function AgendaPage() {
 
                 {['agendado', 'confirmado'].includes(selecionado.status) && (
                   <div className="mt-auto flex flex-wrap gap-2 border-t border-gray-200 pt-3 dark:border-gray-700">
-                    <Button onClick={concluir} disabled={salvando}>
-                      Marcar como concluído
-                    </Button>
                     {new Date(selecionado.data_hora) <= new Date() ? (
-                      <Button variante="secundario" onClick={naoCompareceu} disabled={salvando}>
-                        Não compareceu
-                      </Button>
+                      <>
+                        <Button onClick={concluir} disabled={salvando}>
+                          Marcar como concluído
+                        </Button>
+                        <Button variante="secundario" onClick={naoCompareceu} disabled={salvando}>
+                          Não compareceu
+                        </Button>
+                      </>
                     ) : (
                       <Button variante="secundario" onClick={cancelar} disabled={salvando}>
                         Cancelar agendamento
@@ -672,7 +674,7 @@ export default function AgendaPage() {
             )}
 
             {aba === 'historico' && (
-              <div>
+              <div className="flex flex-1 flex-col">
                 <h2 className="mb-2 text-xs font-semibold tracking-wide text-gray-500 uppercase dark:text-gray-400">
                   Observações
                 </h2>
@@ -683,6 +685,20 @@ export default function AgendaPage() {
                   Agendamentos do histórico não podem ser reagendados ou ter observações editadas —
                   use a aba &quot;Próximos&quot; pra agendamentos futuros.
                 </p>
+                {selecionado.status === 'completo' && (
+                  <div className="mt-auto border-t border-gray-200 pt-3 dark:border-gray-700">
+                    <Button variante="secundario" onClick={naoCompareceu} disabled={salvando}>
+                      Alterar para não compareceu
+                    </Button>
+                  </div>
+                )}
+                {selecionado.status === 'nao_compareceu' && (
+                  <div className="mt-auto border-t border-gray-200 pt-3 dark:border-gray-700">
+                    <Button variante="secundario" onClick={concluir} disabled={salvando}>
+                      Alterar para concluído
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </Card>

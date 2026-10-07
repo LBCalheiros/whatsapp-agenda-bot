@@ -332,6 +332,18 @@ describe('models/agendamento (integração)', () => {
   });
 
   it('não permite cancelar um agendamento já concluído', async () => {
+    const id = await inserirAgendamentoPassado(10);
+
+    await marcarComoCompleto(id);
+
+    await expect(cancelarAgendamento(id)).rejects.toMatchObject({
+      message: expect.stringContaining('completo'),
+    });
+
+    await limparAgendamento(id);
+  });
+
+  it('não permite concluir antes do horário do agendamento', async () => {
     const agendamento = await criarAgendamento({
       clienteId,
       profissionalId,
@@ -339,10 +351,8 @@ describe('models/agendamento (integração)', () => {
       dataHora: dataFutura(120),
     });
 
-    await marcarComoCompleto(agendamento.id);
-
-    await expect(cancelarAgendamento(agendamento.id)).rejects.toMatchObject({
-      message: expect.stringContaining('completo'),
+    await expect(marcarComoCompleto(agendamento.id)).rejects.toMatchObject({
+      message: expect.stringContaining('depois do horário'),
     });
   });
 
@@ -362,22 +372,17 @@ describe('models/agendamento (integração)', () => {
   });
 
   it('não permite concluir novamente um agendamento já concluído', async () => {
-    const agendamento = await criarAgendamento({
-      clienteId,
-      profissionalId,
-      servicoId,
-      dataHora: dataFutura(120),
-    });
+    const id = await inserirAgendamentoPassado(10);
 
-    await marcarComoCompleto(agendamento.id);
+    await marcarComoCompleto(id);
     const historicoAntes = await pool.query(
       `SELECT COUNT(*)::int AS total
        FROM historico_agendamentos
        WHERE agendamento_id = $1`,
-      [agendamento.id],
+      [id],
     );
 
-    const resultado = await marcarComoCompleto(agendamento.id);
+    const resultado = await marcarComoCompleto(id);
 
     expect(resultado.status).toBe('completo');
 
@@ -385,10 +390,12 @@ describe('models/agendamento (integração)', () => {
       `SELECT COUNT(*)::int AS total
        FROM historico_agendamentos
        WHERE agendamento_id = $1`,
-      [agendamento.id],
+      [id],
     );
 
     expect(historicoDepois.rows[0].total).toBe(historicoAntes.rows[0].total);
+
+    await limparAgendamento(id);
   });
 
   it('permite reagendamento administrativo sem antecedência mínima', async () => {
@@ -418,7 +425,7 @@ describe('models/agendamento (integração)', () => {
       dataHora: horarioOcupado,
     });
 
-    await marcarComoCompleto(ocupante.id);
+    await pool.query(`UPDATE agendamentos SET status = 'completo' WHERE id = $1`, [ocupante.id]);
 
     const paraReagendar = await criarAgendamento({
       clienteId,
@@ -436,22 +443,33 @@ describe('models/agendamento (integração)', () => {
   });
 
   it('não permite reagendar um agendamento já concluído pelo admin', async () => {
-    const agendamento = await criarAgendamento({
-      clienteId,
-      profissionalId,
-      servicoId,
-      dataHora: dataFutura(120),
-    });
+    const id = await inserirAgendamentoPassado(10);
 
-    await marcarComoCompleto(agendamento.id);
+    await marcarComoCompleto(id);
 
-    await expect(reagendarComoAdmin(agendamento.id, dataFutura(180))).rejects.toMatchObject({
+    await expect(reagendarComoAdmin(id, dataFutura(180))).rejects.toMatchObject({
       message: expect.stringContaining('agendamentos ativos'),
     });
+
+    await limparAgendamento(id);
+  });
+
+  it('rejeita remarcação pelo cliente a menos de 24h do horário atual', async () => {
+    const id = await inserirAgendamentoEm(180);
+
+    await expect(reagendarAgendamento(id, dataFutura(100))).rejects.toMatchObject({
+      message: expect.stringContaining('24h'),
+    });
+
+    await limparAgendamento(id);
   });
 
   async function inserirAgendamentoPassado(minutosAtras: number): Promise<number> {
-    const inicio = new Date(Date.now() - minutosAtras * 60 * 1000);
+    return inserirAgendamentoEm(-minutosAtras);
+  }
+
+  async function inserirAgendamentoEm(minutosAPartirDeAgora: number): Promise<number> {
+    const inicio = new Date(Date.now() + minutosAPartirDeAgora * 60 * 1000);
     const { rows } = await pool.query(
       `INSERT INTO agendamentos
        (cliente_id, profissional_id, servico_id, data_hora, duracao_minutos, preco)
@@ -513,21 +531,58 @@ describe('models/agendamento (integração)', () => {
     await limparAgendamento(id);
   });
 
-  it('não permite marcar não compareceu em agendamento cancelado ou concluído', async () => {
+  it('não permite marcar não compareceu em agendamento cancelado', async () => {
     const cancelado = await inserirAgendamentoPassado(20);
     await cancelarAgendamento(cancelado);
+
     await expect(marcarComoNaoCompareceu(cancelado)).rejects.toMatchObject({
       message: expect.stringContaining('cancelado'),
     });
 
-    const concluido = await inserirAgendamentoPassado(30);
+    await limparAgendamento(cancelado);
+  });
+
+  it('permite corrigir entre concluído e não compareceu nos dois sentidos', async () => {
+    const id = await inserirAgendamentoPassado(30);
+
+    const concluido = await marcarComoCompleto(id);
+    expect(concluido.status).toBe('completo');
+
+    const naoCompareceu = await marcarComoNaoCompareceu(id);
+    expect(naoCompareceu.status).toBe('nao_compareceu');
+
+    const deNovoConcluido = await marcarComoCompleto(id);
+    expect(deNovoConcluido.status).toBe('completo');
+
+    const historico = await pool.query(
+      `SELECT status_anterior, status_novo FROM historico_agendamentos
+       WHERE agendamento_id = $1 ORDER BY id`,
+      [id],
+    );
+    expect(historico.rows).toEqual([
+      { status_anterior: 'agendado', status_novo: 'completo' },
+      { status_anterior: 'completo', status_novo: 'nao_compareceu' },
+      { status_anterior: 'nao_compareceu', status_novo: 'completo' },
+    ]);
+
+    await limparAgendamento(id);
+  });
+
+  it('não permite cancelar agendamento já concluído ou não compareceu', async () => {
+    const concluido = await inserirAgendamentoPassado(40);
     await marcarComoCompleto(concluido);
-    await expect(marcarComoNaoCompareceu(concluido)).rejects.toMatchObject({
+    await expect(cancelarAgendamento(concluido)).rejects.toMatchObject({
       message: expect.stringContaining('completo'),
     });
 
-    await limparAgendamento(cancelado);
+    const faltou = await inserirAgendamentoPassado(50);
+    await marcarComoNaoCompareceu(faltou);
+    await expect(cancelarAgendamento(faltou)).rejects.toMatchObject({
+      message: expect.stringContaining('nao_compareceu'),
+    });
+
     await limparAgendamento(concluido);
+    await limparAgendamento(faltou);
   });
 
   it('lista agendamento ativo já passado só com incluirAtivosPassados', async () => {

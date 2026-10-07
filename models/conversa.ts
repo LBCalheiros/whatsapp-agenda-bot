@@ -14,6 +14,7 @@ import {
   reagendarAgendamento,
   listarAgendamentos,
   buscarPorId,
+  dentroDoPrazoDeAlteracaoDoCliente,
 } from '@/models/agendamento';
 import {
   buscarAtendimentoAbertoPorTelefone,
@@ -388,7 +389,7 @@ async function processarEscolhaHorario(
   });
 }
 
-// Mesmo dia (horário de Brasília) == sem janela normal de 24h pra cancelar,
+// Mesmo dia (horário de Brasília) == sem janela normal de 24h pra cancelar/remarcar,
 // então a confirmação precisa deixar isso bem claro na hora, já que é a
 // única chance prática do cliente perceber um erro de data/horário.
 function ehHojeBRT(data: Date): boolean {
@@ -405,10 +406,10 @@ function mensagemConfirmacaoAgendamento(dataHora: Date): string {
   const base = `Agendamento confirmado para ${formatarDataHora(dataHora)}. ✅`;
 
   if (ehHojeBRT(dataHora)) {
-    return `${base}\n\n⚠️ Esse horário é hoje — confira com atenção se a data e o horário estão certos. Por ser no mesmo dia, não é possível cancelar pelo prazo normal de 24h; qualquer ajuste precisa ser feito falando com um atendente.`;
+    return `${base}\n\n⚠️ Esse horário é hoje — confira com atenção se a data e o horário estão certos. Por ser no mesmo dia, não é possível cancelar nem remarcar pelo prazo normal de 24h; qualquer ajuste precisa ser feito falando com um atendente.`;
   }
 
-  return `${base}\n\nLembrando: cancelamentos só podem ser feitos até 24h antes do horário marcado.`;
+  return `${base}\n\nLembrando: cancelamentos e remarcações só podem ser feitos até 24h antes do horário marcado.`;
 }
 
 async function processarConfirmacao(
@@ -640,6 +641,17 @@ async function processarConfirmacaoCancelamento(
 async function iniciarFluxoRemarcar(telefone: string, agendamentoId: number) {
   const agendamento = await buscarPorId(agendamentoId);
 
+  if (!dentroDoPrazoDeAlteracaoDoCliente(new Date(agendamento.data_hora))) {
+    await enviarMensagemBotoes({
+      telefone,
+      corpo:
+        'Remarcações só podem ser feitas até 24h antes do horário marcado. Pra ajustar esse agendamento, fale com um atendente.',
+      botoes: BOTAO_ATENDENTE_E_VOLTAR,
+    });
+    await atualizarEstado(telefone, 'menu');
+    return;
+  }
+
   const { rows: servicos } = await pool.query(
     `SELECT duracao_minutos FROM servicos WHERE id = $1`,
     [agendamento.servico_id],
@@ -760,7 +772,7 @@ async function processarConfirmacaoRemarcacao(
     if (error instanceof AppError) {
       // horário ocupado por concorrência, ou caiu abaixo da antecedência mínima
       await enviarMensagemTexto(telefone, error.message);
-      await exibirHorariosParaRemarcar(telefone, agendamentoId, servicoId, duracaoMinutos);
+      await iniciarFluxoRemarcar(telefone, agendamentoId);
       return;
     }
     throw error;

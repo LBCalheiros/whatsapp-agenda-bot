@@ -22,6 +22,13 @@ type Agendamento = {
 };
 
 export const ANTECEDENCIA_MINIMA_HORAS = 2;
+export const HORAS_MINIMAS_ALTERACAO_CLIENTE = 24;
+
+export function dentroDoPrazoDeAlteracaoDoCliente(dataHora: Date): boolean {
+  const horasAteAgendamento = (dataHora.getTime() - Date.now()) / (1000 * 60 * 60);
+  return horasAteAgendamento >= HORAS_MINIMAS_ALTERACAO_CLIENTE;
+}
+
 const DIAS_HISTORICO = 30;
 
 function ehViolacaoDeUnicidade(error: unknown): boolean {
@@ -245,8 +252,8 @@ function validarTransicaoStatus(statusAtual: StatusAgendamento, statusNovo: Stat
     agendado: ['confirmado', 'cancelado', 'completo', 'nao_compareceu'],
     confirmado: ['cancelado', 'completo', 'nao_compareceu'],
     cancelado: [],
-    completo: [],
-    nao_compareceu: [],
+    completo: ['nao_compareceu'],
+    nao_compareceu: ['completo'],
   };
 
   if (statusAtual === statusNovo) return;
@@ -326,10 +333,7 @@ export async function cancelarComoCliente(agendamentoId: number) {
       return agendamento;
     }
 
-    const horasAteAgendamento =
-      (new Date(agendamento.data_hora).getTime() - Date.now()) / (1000 * 60 * 60);
-
-    if (horasAteAgendamento < 24) {
+    if (!dentroDoPrazoDeAlteracaoDoCliente(new Date(agendamento.data_hora))) {
       throw new AppError('Cancelamento só é permitido até 24h antes do horário agendado');
     }
 
@@ -366,9 +370,23 @@ async function mudarStatusSemLock(
   });
 }
 
+function exigirHorarioJaIniciado(agendamento: Agendamento, acao: string) {
+  if (new Date(agendamento.data_hora).getTime() > Date.now()) {
+    throw new AppError(`Só é possível ${acao} depois do horário agendado`);
+  }
+}
+
 export async function marcarComoCompleto(agendamentoId: number): Promise<Agendamento> {
   return comLockDeAgendamento(agendamentoId, async () => {
     const agendamento = await buscarPorId(agendamentoId);
+
+    if (agendamento.status === 'completo') {
+      return agendamento;
+    }
+
+    validarTransicaoStatus(agendamento.status, 'completo');
+    exigirHorarioJaIniciado(agendamento, 'concluir o agendamento');
+
     return mudarStatusSemLock(agendamento, 'completo');
   });
 }
@@ -381,9 +399,8 @@ export async function marcarComoNaoCompareceu(agendamentoId: number): Promise<Ag
       return agendamento;
     }
 
-    if (new Date(agendamento.data_hora).getTime() > Date.now()) {
-      throw new AppError('Só é possível marcar não comparecimento depois do horário agendado');
-    }
+    validarTransicaoStatus(agendamento.status, 'nao_compareceu');
+    exigirHorarioJaIniciado(agendamento, 'marcar não comparecimento');
 
     return mudarStatusSemLock(agendamento, 'nao_compareceu');
   });
@@ -395,6 +412,10 @@ export async function reagendarAgendamento(agendamentoId: number, novaDataHora: 
 
     if (!['agendado', 'confirmado'].includes(agendamento.status)) {
       throw new AppError('Só é possível reagendar agendamentos ativos');
+    }
+
+    if (!dentroDoPrazoDeAlteracaoDoCliente(new Date(agendamento.data_hora))) {
+      throw new AppError('Remarcação só é permitida até 24h antes do horário agendado');
     }
 
     const duracaoMinutos = agendamento.duracao_minutos;
