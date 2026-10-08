@@ -3,6 +3,8 @@ import { obterSessaoAtual } from '@/infra/autenticacaoMiddleware';
 import { pool } from '@/infra/database';
 import { enviarMensagemTexto } from '@/infra/whatsapp';
 import { encerrarAtendimento } from '@/models/atendimento';
+import { obterConfiguracaoEmpresaSegura } from '@/models/configuracaoEmpresa';
+import { ENCERRAMENTO_PADRAO } from '@/lib/mensagensPadrao';
 import { AppError } from '@/infra/errors';
 
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -26,10 +28,8 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
         `UPDATE conversas SET estado = 'menu', contexto = NULL, atualizado_em = now() WHERE telefone = $1`,
         [telefone],
       );
-      await enviarMensagemTexto(
-        telefone,
-        'Atendimento encerrado. Digite qualquer mensagem pra ver o menu novamente.',
-      );
+      const { mensagem_encerramento } = await obterConfiguracaoEmpresaSegura();
+      await enviarMensagemTexto(telefone, mensagem_encerramento ?? ENCERRAMENTO_PADRAO);
     }
 
     return NextResponse.json(atendimento);

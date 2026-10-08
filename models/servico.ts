@@ -106,3 +106,29 @@ export async function definirAtivoServico(id: number, ativo: boolean) {
   }
   return rows[0] as Servico;
 }
+
+const MENSAGEM_SERVICO_COM_AGENDAMENTOS =
+  'Não é possível excluir um serviço que possui agendamentos. Desative-o para preservar o histórico.';
+
+// Só exclui serviço que nunca foi agendado; os vínculos com profissionais saem junto
+// (cascade). Com agendamentos, a saída é desativar, que preserva o histórico e a receita.
+export async function excluirServico(id: number): Promise<void> {
+  await buscarServicoPorId(id);
+
+  const { rows } = await pool.query(`SELECT 1 FROM agendamentos WHERE servico_id = $1 LIMIT 1`, [
+    id,
+  ]);
+  if (rows.length > 0) {
+    throw new AppError(MENSAGEM_SERVICO_COM_AGENDAMENTOS, 409);
+  }
+
+  try {
+    await pool.query(`DELETE FROM servicos WHERE id = $1`, [id]);
+  } catch (error) {
+    // um agendamento pode ter sido criado entre a checagem e o delete
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23503') {
+      throw new AppError(MENSAGEM_SERVICO_COM_AGENDAMENTOS, 409);
+    }
+    throw error;
+  }
+}

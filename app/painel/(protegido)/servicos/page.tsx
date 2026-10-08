@@ -74,6 +74,27 @@ function FormularioServico({ servico, onSalvo }: { servico: Servico; onSalvo: ()
     }
   }
 
+  async function excluir() {
+    if (
+      !confirm(
+        `Excluir "${servico.nome}" definitivamente? Essa ação só é permitida quando o serviço não possui agendamentos e não pode ser desfeita.`,
+      )
+    ) {
+      return;
+    }
+
+    setErro(null);
+    setSalvando(true);
+    try {
+      await apiFetch(`/api/servicos/${servico.id}`, { method: 'DELETE' });
+      onSalvo();
+    } catch (error) {
+      setErro(error instanceof ApiError ? error.message : 'Erro inesperado');
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   return (
     <Card>
       <form onSubmit={salvar} className="flex flex-col gap-3">
@@ -127,14 +148,24 @@ function FormularioServico({ servico, onSalvo }: { servico: Servico; onSalvo: ()
           <Button type="submit" disabled={salvando}>
             Salvar
           </Button>
-          <button
-            type="button"
-            onClick={alternarAtivo}
-            disabled={salvando}
-            className="text-xs text-gray-500 hover:underline disabled:opacity-50 dark:text-gray-400"
-          >
-            {servico.ativo ? 'Desativar' : 'Reativar'}
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={alternarAtivo}
+              disabled={salvando}
+              className="text-xs text-gray-500 hover:underline disabled:opacity-50 dark:text-gray-400"
+            >
+              {servico.ativo ? 'Desativar' : 'Reativar'}
+            </button>
+            <button
+              type="button"
+              onClick={excluir}
+              disabled={salvando}
+              className="text-xs text-red-600 hover:underline disabled:opacity-50 dark:text-red-400"
+            >
+              Excluir
+            </button>
+          </div>
         </div>
       </form>
     </Card>

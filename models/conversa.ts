@@ -22,6 +22,8 @@ import {
   registrarMensagem,
 } from '@/models/atendimento';
 import { logger } from '@/infra/logger';
+import { obterConfiguracaoEmpresaSegura } from '@/models/configuracaoEmpresa';
+import { SAUDACAO_PADRAO } from '@/lib/mensagensPadrao';
 
 const TIMEOUT_MINUTOS = 10;
 const DIAS_BUSCA_HORARIOS = 7;
@@ -97,6 +99,13 @@ function conversaExpirou(conversa: EstadoConversa): boolean {
   return minutosSemInteracao > TIMEOUT_MINUTOS;
 }
 
+// mensagem inicial personalizada pela empresa (vai sozinha numa linha antes da pergunta
+// do menu); sem personalização, mantém o "Olá!" de sempre
+async function saudacaoInicial(): Promise<string> {
+  const { mensagem_inicial } = await obterConfiguracaoEmpresaSegura();
+  return mensagem_inicial ? `${mensagem_inicial}\n\n` : `${SAUDACAO_PADRAO} `;
+}
+
 async function enviarMenu(telefone: string, saudacao = '') {
   await enviarMensagemBotoes({
     telefone,
@@ -147,7 +156,7 @@ async function processarMensagemInterna(telefone: string, entrada: Entrada) {
   if (precisaResetar) {
     await atualizarEstado(telefone, 'menu');
     const saudacao = novaConversa
-      ? 'Olá! '
+      ? await saudacaoInicial()
       : expirou
         ? 'Faz um tempo que você não responde, vamos recomeçar. '
         : '';
@@ -157,7 +166,7 @@ async function processarMensagemInterna(telefone: string, entrada: Entrada) {
 
   switch (conversa.estado) {
     case 'menu':
-      await processarMenu(telefone, entrada);
+      await processarMenu(telefone, entrada, conversa.contexto);
       break;
 
     case 'fluxo_agendamento_escolhendo_servico':
@@ -203,7 +212,30 @@ async function processarMensagemInterna(telefone: string, entrada: Entrada) {
   }
 }
 
-async function processarMenu(telefone: string, entrada: Entrada) {
+// o contexto do menu só carrega um agendamento quando o cliente chegou nele por uma
+// tela de erro de um agendamento específico (ex: remarcação fora do prazo); só aceita
+// o agendamento se for do próprio cliente
+async function obterAgendamentoDoContexto(
+  clienteId: number,
+  contexto: Record<string, unknown> | null,
+): Promise<number | null> {
+  const agendamentoId = contexto?.agendamentoId;
+  if (typeof agendamentoId !== 'number') return null;
+
+  try {
+    const agendamento = await buscarPorId(agendamentoId);
+    return agendamento.cliente_id === clienteId ? agendamento.id : null;
+  } catch (error) {
+    if (error instanceof AppError) return null;
+    throw error;
+  }
+}
+
+async function processarMenu(
+  telefone: string,
+  entrada: Entrada,
+  contexto: Record<string, unknown> | null,
+) {
   if (entrada.tipo === 'botao') {
     switch (entrada.id) {
       case 'menu_agendar':
@@ -214,7 +246,8 @@ async function processarMenu(telefone: string, entrada: Entrada) {
         return;
       case 'menu_atendente': {
         const cliente = await buscarOuCriarClientePorTelefone(telefone);
-        await iniciarAtendimento(cliente.id);
+        const agendamentoId = await obterAgendamentoDoContexto(cliente.id, contexto);
+        await iniciarAtendimento(cliente.id, agendamentoId);
         await atualizarEstado(telefone, 'aguardando_atendente');
         try {
           await enviarMensagemTexto(
@@ -232,6 +265,8 @@ async function processarMenu(telefone: string, entrada: Entrada) {
     }
   }
 
+  // reseta o estado pra limpar um agendamento que tenha ficado no contexto do menu
+  await atualizarEstado(telefone, 'menu');
   await enviarMensagemTexto(telefone, 'Por favor, escolha uma das opções abaixo:');
   await enviarMenu(telefone);
 }
@@ -402,14 +437,15 @@ function ehHojeBRT(data: Date): boolean {
   );
 }
 
-function mensagemConfirmacaoAgendamento(dataHora: Date): string {
+function mensagemConfirmacaoAgendamento(dataHora: Date, textoAdicional: string | null): string {
   const base = `Agendamento confirmado para ${formatarDataHora(dataHora)}. ✅`;
+  const adicional = textoAdicional ? `\n\n${textoAdicional}` : '';
 
   if (ehHojeBRT(dataHora)) {
-    return `${base}\n\n⚠️ Esse horário é hoje — confira com atenção se a data e o horário estão certos. Por ser no mesmo dia, não é possível cancelar nem remarcar pelo prazo normal de 24h; qualquer ajuste precisa ser feito falando com um atendente.`;
+    return `${base}\n\n⚠️ Esse horário é hoje — confira com atenção se a data e o horário estão certos. Por ser no mesmo dia, não é possível cancelar nem remarcar pelo prazo normal de 24h; qualquer ajuste precisa ser feito falando com um atendente.${adicional}`;
   }
 
-  return `${base}\n\nLembrando: cancelamentos e remarcações só podem ser feitos até 24h antes do horário marcado.`;
+  return `${base}\n\nLembrando: cancelamentos e remarcações só podem ser feitos até 24h antes do horário marcado.${adicional}`;
 }
 
 async function processarConfirmacao(
@@ -447,7 +483,11 @@ async function processarConfirmacao(
     });
 
     await atualizarEstado(telefone, 'menu');
-    await enviarMensagemTexto(telefone, mensagemConfirmacaoAgendamento(dataHora));
+    const { mensagem_confirmacao } = await obterConfiguracaoEmpresaSegura();
+    await enviarMensagemTexto(
+      telefone,
+      mensagemConfirmacaoAgendamento(dataHora, mensagem_confirmacao),
+    );
     await enviarMenu(telefone);
   } catch (error) {
     if (error instanceof AppError) {
@@ -648,7 +688,7 @@ async function iniciarFluxoRemarcar(telefone: string, agendamentoId: number) {
         'Remarcações só podem ser feitas até 24h antes do horário marcado. Pra ajustar esse agendamento, fale com um atendente.',
       botoes: BOTAO_ATENDENTE_E_VOLTAR,
     });
-    await atualizarEstado(telefone, 'menu');
+    await atualizarEstado(telefone, 'menu', { agendamentoId });
     return;
   }
 
@@ -664,7 +704,7 @@ async function iniciarFluxoRemarcar(telefone: string, agendamentoId: number) {
       corpo: 'Não foi possível remarcar esse agendamento agora.',
       botoes: BOTAO_ATENDENTE_E_VOLTAR,
     });
-    await atualizarEstado(telefone, 'menu');
+    await atualizarEstado(telefone, 'menu', { agendamentoId });
     return;
   }
 
@@ -685,7 +725,7 @@ async function exibirHorariosParaRemarcar(
       corpo: `Não há horários disponíveis nos próximos ${DIAS_BUSCA_HORARIOS} dias pra remarcar.`,
       botoes: BOTAO_ATENDENTE_E_VOLTAR,
     });
-    await atualizarEstado(telefone, 'menu');
+    await atualizarEstado(telefone, 'menu', { agendamentoId });
     return;
   }
 
