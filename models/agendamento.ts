@@ -29,7 +29,7 @@ export function dentroDoPrazoDeAlteracaoDoCliente(dataHora: Date): boolean {
   return horasAteAgendamento >= HORAS_MINIMAS_ALTERACAO_CLIENTE;
 }
 
-const DIAS_HISTORICO = 30;
+export const DIAS_HISTORICO = 30;
 
 function ehViolacaoDeUnicidade(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
@@ -573,4 +573,47 @@ async function registrarHistoricoNaTransacao(
      VALUES ($1, $2, $3, $4)`,
     [agendamentoId, statusAnterior, statusNovo, dataHoraAnterior ?? null],
   );
+}
+
+// Agendamentos que já saíram da janela do Histórico (últimos DIAS_HISTORICO dias), com a
+// mesma regra da listagem: concluído e não compareceu contam pela data do atendimento;
+// cancelado conta pela data do cancelamento. Agendado e confirmado nunca entram, mesmo
+// antigos, porque ainda precisam ser concluídos ou marcados como não compareceu.
+const CONDICAO_AGENDAMENTO_ANTIGO = `(
+  (a.status IN ('completo', 'nao_compareceu') AND a.data_hora < $1)
+  OR (a.status = 'cancelado' AND NOT EXISTS (
+    SELECT 1
+    FROM historico_agendamentos h
+    WHERE h.agendamento_id = a.id
+      AND h.status_novo = 'cancelado'
+      AND h.alterado_em >= $1
+  ))
+)`;
+
+function limiteDoHistorico(): Date {
+  return new Date(Date.now() - DIAS_HISTORICO * 24 * 60 * 60 * 1000);
+}
+
+export async function contarAgendamentosAntigos(): Promise<{ total: number; limite: Date }> {
+  const limite = limiteDoHistorico();
+
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS total FROM agendamentos a WHERE ${CONDICAO_AGENDAMENTO_ANTIGO}`,
+    [limite],
+  );
+
+  return { total: rows[0].total, limite };
+}
+
+// Apaga de vez, e o histórico de status de cada um sai junto (cascade). A receita desses
+// períodos deixa de existir, porque ela é calculada em cima dos agendamentos concluídos.
+export async function limparAgendamentosAntigos(): Promise<{ removidos: number; limite: Date }> {
+  const limite = limiteDoHistorico();
+
+  const { rowCount } = await pool.query(
+    `DELETE FROM agendamentos a WHERE ${CONDICAO_AGENDAMENTO_ANTIGO}`,
+    [limite],
+  );
+
+  return { removidos: rowCount ?? 0, limite };
 }

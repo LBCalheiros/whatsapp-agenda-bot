@@ -240,6 +240,9 @@ export default function AgendaPage() {
   const [erroAcao, setErroAcao] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [limpando, setLimpando] = useState(false);
+  const [erroLimpeza, setErroLimpeza] = useState<string | null>(null);
+  const [resultadoLimpeza, setResultadoLimpeza] = useState<string | null>(null);
 
   const euEstado = useApiPolling<EuMesmo>('/api/auth/me', 60000);
   const souGerente = euEstado.status === 'sucesso' && euEstado.dados.role === 'gerente';
@@ -364,6 +367,35 @@ export default function AgendaPage() {
       setErroAcao(error instanceof ApiError ? error.message : 'Erro inesperado');
     } finally {
       setSalvando(false);
+    }
+  }
+
+  async function limparAntigos() {
+    setErroLimpeza(null);
+    setResultadoLimpeza(null);
+    setLimpando(true);
+    try {
+      const previa = await apiFetch<{ total: number; dias: number }>('/api/agendamentos/antigos');
+
+      if (previa.total === 0) {
+        setResultadoLimpeza(`Não há agendamentos com mais de ${previa.dias} dias pra limpar.`);
+        return;
+      }
+
+      const confirmado = confirm(
+        `Apagar definitivamente ${previa.total} agendamento(s) concluído(s), cancelado(s) ou de não comparecimento com mais de ${previa.dias} dias?\n\nA receita desses períodos também deixa de aparecer. Essa ação não pode ser desfeita.`,
+      );
+      if (!confirmado) return;
+
+      const resultado = await apiFetch<{ removidos: number }>('/api/agendamentos/antigos', {
+        method: 'DELETE',
+      });
+      setResultadoLimpeza(`${resultado.removidos} agendamento(s) apagado(s).`);
+      forcarAtualizacao();
+    } catch (error) {
+      setErroLimpeza(error instanceof ApiError ? error.message : 'Erro inesperado');
+    } finally {
+      setLimpando(false);
     }
   }
 
@@ -502,6 +534,18 @@ export default function AgendaPage() {
               placeholder="Buscar por nome ou telefone..."
               className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
             />
+          </div>
+        )}
+
+        {aba === 'historico' && souGerente && (
+          <div className="flex flex-col gap-1">
+            <Button variante="secundario" onClick={limparAntigos} disabled={limpando}>
+              Limpar agendamentos antigos
+            </Button>
+            {resultadoLimpeza && (
+              <p className="text-xs text-gray-500 dark:text-gray-400">{resultadoLimpeza}</p>
+            )}
+            {erroLimpeza && <ErrorState mensagem={erroLimpeza} />}
           </div>
         )}
 

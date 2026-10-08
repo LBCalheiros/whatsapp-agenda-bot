@@ -10,6 +10,7 @@ import {
   marcarComoCompleto,
   marcarComoNaoCompareceu,
   listarAgendamentos,
+  contarAgendamentosAntigos,
 } from '@/models/agendamento';
 import { paraHorarioLocal } from '@/infra/data';
 import { atualizarServico } from '@/models/servico';
@@ -583,6 +584,46 @@ describe('models/agendamento (integração)', () => {
 
     await limparAgendamento(concluido);
     await limparAgendamento(faltou);
+  });
+
+  it('conta como antigos só os finalizados fora da janela do histórico', async () => {
+    const minutosPorDia = 24 * 60;
+    const antes = await contarAgendamentosAntigos();
+
+    async function inserirComStatus(
+      diasAtras: number,
+      deslocamentoMinutos: number,
+      status: string,
+      cancelamentoDiasAtras?: number,
+    ): Promise<number> {
+      const id = await inserirAgendamentoPassado(diasAtras * minutosPorDia + deslocamentoMinutos);
+      await pool.query(`UPDATE agendamentos SET status = $2 WHERE id = $1`, [id, status]);
+      if (cancelamentoDiasAtras !== undefined) {
+        await pool.query(
+          `INSERT INTO historico_agendamentos
+           (agendamento_id, status_anterior, status_novo, alterado_em)
+           VALUES ($1, 'agendado', 'cancelado', now() - make_interval(days => $2))`,
+          [id, cancelamentoDiasAtras],
+        );
+      }
+      return id;
+    }
+
+    const ids = [
+      await inserirComStatus(40, 10, 'completo'), // antigo: conta
+      await inserirComStatus(40, 70, 'nao_compareceu'), // antigo: conta
+      await inserirComStatus(40, 130, 'cancelado', 40), // cancelado há 40 dias: conta
+      await inserirComStatus(10, 10, 'completo'), // dentro da janela: não conta
+      await inserirComStatus(40, 190, 'agendado'), // ativo antigo: nunca conta
+      await inserirComStatus(40, 250, 'cancelado', 2), // cancelado há 2 dias: não conta
+    ];
+
+    const depois = await contarAgendamentosAntigos();
+    expect(depois.total - antes.total).toBe(3);
+
+    for (const id of ids) {
+      await limparAgendamento(id);
+    }
   });
 
   it('lista agendamento ativo já passado só com incluirAtivosPassados', async () => {
