@@ -834,7 +834,9 @@ async function processarGatilhoLembrete(
   const agendamento = rows[0];
 
   const valido =
-    agendamento && agendamento.cliente_telefone === telefone && agendamento.status === 'agendado';
+    agendamento &&
+    agendamento.cliente_telefone === telefone &&
+    ['agendado', 'confirmado'].includes(agendamento.status);
 
   if (!valido) {
     await enviarMensagemTexto(telefone, 'Esse agendamento não está mais disponível.');

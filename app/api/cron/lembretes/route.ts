@@ -23,7 +23,7 @@ export async function GET(request: Request) {
      FROM agendamentos a
      JOIN clientes c ON c.id = a.cliente_id
      JOIN servicos s ON s.id = a.servico_id
-     WHERE a.status = 'agendado'
+     WHERE a.status IN ('agendado', 'confirmado')
        AND a.lembrete_enviado = false
        AND a.data_hora BETWEEN $1 AND $2`,
     [inicioDia, fimDia],

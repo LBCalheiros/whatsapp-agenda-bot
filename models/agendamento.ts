@@ -1,6 +1,7 @@
 import { pool, withTransaction } from '@/infra/database';
 import { AppError } from '@/infra/errors';
 import { fimDoDiaBRT, inicioDoDiaBRT } from '@/infra/data';
+import { buscarServicoPorId } from '@/models/servico';
 import { obterProfissionalDisponivel, validarHorarioDisponivel } from '@/models/disponibilidade';
 import { buscarAntecedenciaMinima, profissionalAtendeServico } from '@/models/profissional';
 import { comLockDeProfissional } from '@/infra/lockProfissional';
@@ -343,7 +344,7 @@ export async function cancelarComoCliente(agendamentoId: number) {
 
 async function mudarStatusSemLock(
   agendamento: Agendamento,
-  statusNovo: 'completo' | 'nao_compareceu',
+  statusNovo: 'confirmado' | 'completo' | 'nao_compareceu',
 ): Promise<Agendamento> {
   if (agendamento.status === statusNovo) {
     return agendamento;
@@ -374,6 +375,86 @@ function exigirHorarioJaIniciado(agendamento: Agendamento, acao: string) {
   if (new Date(agendamento.data_hora).getTime() > Date.now()) {
     throw new AppError(`Só é possível ${acao} depois do horário agendado`);
   }
+}
+
+// confirmação feita pelo funcionário: a partir dela o serviço do agendamento não pode
+// mais ser trocado
+export async function marcarComoConfirmado(agendamentoId: number): Promise<Agendamento> {
+  return comLockDeAgendamento(agendamentoId, async () => {
+    const agendamento = await buscarPorId(agendamentoId);
+
+    if (agendamento.status === 'confirmado') {
+      return agendamento;
+    }
+
+    validarTransicaoStatus(agendamento.status, 'confirmado');
+
+    return mudarStatusSemLock(agendamento, 'confirmado');
+  });
+}
+
+// Troca o serviço de um agendamento ainda não confirmado. A duração e o preço do
+// agendamento passam a ser os do novo serviço (são cópias gravadas no agendamento), e o
+// horário continua o mesmo, então o novo serviço não pode invadir o próximo agendamento
+// do profissional. Como no reagendamento feito pelo painel, a janela de disponibilidade
+// não é conferida: o funcionário decide.
+export async function alterarServicoDoAgendamento(
+  agendamentoId: number,
+  novoServicoId: number,
+): Promise<Agendamento> {
+  return comLockDeAgendamento(agendamentoId, async () => {
+    const agendamento = await buscarPorId(agendamentoId);
+
+    if (agendamento.status !== 'agendado') {
+      throw new AppError('O serviço só pode ser alterado antes da confirmação do agendamento');
+    }
+
+    if (agendamento.servico_id === novoServicoId) {
+      return agendamento;
+    }
+
+    const servico = await buscarServicoPorId(novoServicoId);
+
+    if (!servico.ativo) {
+      throw new AppError('Esse serviço está desativado');
+    }
+
+    if (!(await profissionalAtendeServico(agendamento.profissional_id, novoServicoId))) {
+      throw new AppError('Esse profissional não atende esse serviço');
+    }
+
+    return comLockDeProfissional(agendamento.profissional_id, async () => {
+      try {
+        await validarConflitoDeHorario(
+          agendamento.profissional_id,
+          agendamentoId,
+          new Date(agendamento.data_hora),
+          servico.duracao_minutos,
+        );
+      } catch (error) {
+        if (error instanceof AppError) {
+          throw new AppError(
+            'O novo serviço é mais longo e entra em conflito com outro agendamento do profissional',
+          );
+        }
+        throw error;
+      }
+
+      const { rows } = await pool.query(
+        `UPDATE agendamentos
+         SET servico_id = $1, duracao_minutos = $2, preco = $3
+         WHERE id = $4 AND status = 'agendado'
+         RETURNING *`,
+        [servico.id, servico.duracao_minutos, servico.preco, agendamentoId],
+      );
+
+      if (rows.length === 0) {
+        throw new AppError('Agendamento foi alterado por outra operação');
+      }
+
+      return rows[0] as Agendamento;
+    });
+  });
 }
 
 export async function marcarComoCompleto(agendamentoId: number): Promise<Agendamento> {

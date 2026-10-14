@@ -19,6 +19,8 @@ type PeriodoReceita = 'mes' | 'hoje' | 'tudo' | 'personalizado';
 type Agendamento = {
   id: number;
   cliente_id: number;
+  profissional_id: number;
+  servico_id: number;
   cliente_nome: string | null;
   cliente_telefone: string;
   profissional_nome: string;
@@ -90,6 +92,71 @@ function paraInputDatetimeLocal(iso: string): string {
 
 function linkWhatsapp(telefone: string): string {
   return `https://wa.me/${telefone.replace(/\D/g, '')}`;
+}
+
+function SecaoServico({
+  agendamento,
+  servicos,
+  onAlterado,
+}: {
+  agendamento: Agendamento;
+  servicos: Servico[];
+  onAlterado: () => void;
+}) {
+  const [servicoId, setServicoId] = useState(agendamento.servico_id);
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+
+  // o serviço atual pode ter sido desativado depois do agendamento
+  const opcoes = servicos.some((servico) => servico.id === agendamento.servico_id)
+    ? servicos
+    : [{ id: agendamento.servico_id, nome: agendamento.servico_nome }, ...servicos];
+
+  async function salvar(evento: FormEvent) {
+    evento.preventDefault();
+    setErro(null);
+    setSalvando(true);
+    try {
+      await apiFetch(`/api/agendamentos/${agendamento.id}/servico`, {
+        method: 'PATCH',
+        body: JSON.stringify({ servicoId }),
+      });
+      onAlterado();
+    } catch (error) {
+      setErro(error instanceof ApiError ? error.message : 'Erro inesperado');
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  return (
+    <div>
+      <h2 className="mb-2 text-xs font-semibold tracking-wide text-gray-500 uppercase dark:text-gray-400">
+        Serviço
+      </h2>
+      <form onSubmit={salvar} className="flex items-center gap-2">
+        <select
+          value={servicoId}
+          onChange={(e) => setServicoId(Number(e.target.value))}
+          className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-gray-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+        >
+          {opcoes.map((servico) => (
+            <option key={servico.id} value={servico.id}>
+              {servico.nome}
+            </option>
+          ))}
+        </select>
+        <Button type="submit" disabled={salvando || servicoId === agendamento.servico_id}>
+          Salvar serviço
+        </Button>
+      </form>
+      {erro && <ErrorState mensagem={erro} />}
+      <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+        Só dá para trocar o serviço até a confirmação. A duração e o preço passam a ser os do novo
+        serviço.
+      </p>
+    </div>
+  );
 }
 
 function SecaoReceita() {
@@ -399,6 +466,26 @@ export default function AgendaPage() {
     }
   }
 
+  async function confirmar() {
+    if (!selecionado) return;
+    if (
+      !confirm('Confirmar este agendamento? Depois disso o serviço não poderá mais ser alterado.')
+    ) {
+      return;
+    }
+
+    setErroAcao(null);
+    setSalvando(true);
+    try {
+      await apiFetch(`/api/agendamentos/${selecionado.id}/confirmar`, { method: 'PATCH' });
+      forcarAtualizacao();
+    } catch (error) {
+      setErroAcao(error instanceof ApiError ? error.message : 'Erro inesperado');
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   async function concluir() {
     if (!selecionado) return;
     if (!confirm('Marcar este agendamento como concluído?')) return;
@@ -658,6 +745,15 @@ export default function AgendaPage() {
 
             {aba === 'proximos' && (
               <>
+                {selecionado.status === 'agendado' && (
+                  <SecaoServico
+                    key={`${selecionado.id}-${selecionado.servico_id}`}
+                    agendamento={selecionado}
+                    servicos={servicos}
+                    onAlterado={forcarAtualizacao}
+                  />
+                )}
+
                 <div>
                   <h2 className="mb-2 text-xs font-semibold tracking-wide text-gray-500 uppercase dark:text-gray-400">
                     Reagendar
@@ -708,9 +804,16 @@ export default function AgendaPage() {
                         </Button>
                       </>
                     ) : (
-                      <Button variante="secundario" onClick={cancelar} disabled={salvando}>
-                        Cancelar agendamento
-                      </Button>
+                      <>
+                        {selecionado.status === 'agendado' && (
+                          <Button onClick={confirmar} disabled={salvando}>
+                            Confirmar agendamento
+                          </Button>
+                        )}
+                        <Button variante="secundario" onClick={cancelar} disabled={salvando}>
+                          Cancelar agendamento
+                        </Button>
+                      </>
                     )}
                   </div>
                 )}

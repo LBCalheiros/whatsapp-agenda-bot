@@ -8,7 +8,9 @@ import {
   reagendarAgendamento,
   reagendarComoAdmin,
   marcarComoCompleto,
+  marcarComoConfirmado,
   marcarComoNaoCompareceu,
+  alterarServicoDoAgendamento,
   listarAgendamentos,
   contarAgendamentosAntigos,
 } from '@/models/agendamento';
@@ -624,6 +626,137 @@ describe('models/agendamento (integração)', () => {
     for (const id of ids) {
       await limparAgendamento(id);
     }
+  });
+
+  async function criarServicoParaTroca(opcoes: {
+    duracaoMinutos: number;
+    preco: number;
+    ativo?: boolean;
+    vincular?: boolean;
+  }): Promise<number> {
+    const { rows } = await pool.query(
+      `INSERT INTO servicos (nome, duracao_minutos, preco, ativo)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id`,
+      [
+        `Serviço troca Jest ${Date.now()}-${Math.random()}`,
+        opcoes.duracaoMinutos,
+        opcoes.preco,
+        opcoes.ativo ?? true,
+      ],
+    );
+
+    if (opcoes.vincular ?? true) {
+      await pool.query(
+        `INSERT INTO profissional_servicos (profissional_id, servico_id) VALUES ($1, $2)`,
+        [profissionalId, rows[0].id],
+      );
+    }
+
+    return rows[0].id;
+  }
+
+  async function removerServicoDeTroca(id: number) {
+    await pool.query(`DELETE FROM servicos WHERE id = $1`, [id]);
+  }
+
+  it('troca o serviço antes da confirmação e passa a usar duração e preço do novo serviço', async () => {
+    const novoServicoId = await criarServicoParaTroca({ duracaoMinutos: 45, preco: 80 });
+    const id = await inserirAgendamentoEm(60 * 24 * 7);
+
+    const resultado = await alterarServicoDoAgendamento(id, novoServicoId);
+
+    expect(resultado.servico_id).toBe(novoServicoId);
+    expect(resultado.duracao_minutos).toBe(45);
+    expect(Number(resultado.preco)).toBe(80);
+    expect(resultado.status).toBe('agendado');
+
+    await limparAgendamento(id);
+    await removerServicoDeTroca(novoServicoId);
+  });
+
+  it('não permite trocar o serviço depois da confirmação', async () => {
+    const novoServicoId = await criarServicoParaTroca({ duracaoMinutos: 30, preco: 60 });
+    const id = await inserirAgendamentoEm(60 * 24 * 7);
+
+    await marcarComoConfirmado(id);
+
+    await expect(alterarServicoDoAgendamento(id, novoServicoId)).rejects.toMatchObject({
+      message: expect.stringContaining('antes da confirmação'),
+    });
+
+    await limparAgendamento(id);
+    await removerServicoDeTroca(novoServicoId);
+  });
+
+  it('confirma o agendamento uma única vez e registra no histórico', async () => {
+    const id = await inserirAgendamentoEm(60 * 24 * 7);
+
+    const primeira = await marcarComoConfirmado(id);
+    const segunda = await marcarComoConfirmado(id);
+
+    expect(primeira.status).toBe('confirmado');
+    expect(segunda.status).toBe('confirmado');
+
+    const historico = await pool.query(
+      `SELECT status_anterior, status_novo FROM historico_agendamentos WHERE agendamento_id = $1`,
+      [id],
+    );
+    expect(historico.rows).toEqual([{ status_anterior: 'agendado', status_novo: 'confirmado' }]);
+
+    await limparAgendamento(id);
+  });
+
+  it('não permite confirmar um agendamento cancelado', async () => {
+    const id = await inserirAgendamentoEm(60 * 24 * 7);
+    await cancelarAgendamento(id);
+
+    await expect(marcarComoConfirmado(id)).rejects.toMatchObject({
+      message: expect.stringContaining('cancelado'),
+    });
+
+    await limparAgendamento(id);
+  });
+
+  it('recusa trocar para serviço que o profissional não atende ou que está desativado', async () => {
+    const naoAtendido = await criarServicoParaTroca({
+      duracaoMinutos: 30,
+      preco: 50,
+      vincular: false,
+    });
+    const desativado = await criarServicoParaTroca({ duracaoMinutos: 30, preco: 50, ativo: false });
+    const id = await inserirAgendamentoEm(60 * 24 * 7);
+
+    await expect(alterarServicoDoAgendamento(id, naoAtendido)).rejects.toMatchObject({
+      message: expect.stringContaining('não atende'),
+    });
+    await expect(alterarServicoDoAgendamento(id, desativado)).rejects.toMatchObject({
+      message: expect.stringContaining('desativado'),
+    });
+
+    await limparAgendamento(id);
+    await removerServicoDeTroca(naoAtendido);
+    await removerServicoDeTroca(desativado);
+  });
+
+  it('recusa trocar para um serviço mais longo que invade o próximo agendamento', async () => {
+    const longo = await criarServicoParaTroca({ duracaoMinutos: 60, preco: 90 });
+    const base = 60 * 24 * 8;
+    const primeiro = await inserirAgendamentoEm(base);
+    const segundo = await inserirAgendamentoEm(base + 30);
+
+    await expect(alterarServicoDoAgendamento(primeiro, longo)).rejects.toMatchObject({
+      message: expect.stringContaining('mais longo'),
+    });
+
+    const { rows } = await pool.query(`SELECT servico_id FROM agendamentos WHERE id = $1`, [
+      primeiro,
+    ]);
+    expect(rows[0].servico_id).toBe(servicoId);
+
+    await limparAgendamento(primeiro);
+    await limparAgendamento(segundo);
+    await removerServicoDeTroca(longo);
   });
 
   it('lista agendamento ativo já passado só com incluirAtivosPassados', async () => {
