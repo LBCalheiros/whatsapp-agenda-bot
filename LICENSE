@@ -1,0 +1,124 @@
+LICENÇA DE USO LIVRE SEM VENDA, versão 1.1
+
+Copyright (c) 2026 Lucca Barros Calheiros (GitHub: @LBCalheiros)
+
+Todos os direitos reservados, exceto os expressamente concedidos abaixo.
+
+
+1. DEFINIÇÕES
+
+"Software": o código-fonte, a documentação e os demais arquivos deste
+repositório.
+
+"Obra Derivada": qualquer modificação, adaptação, tradução ou obra que
+incorpore parte do Software.
+
+"Venda": qualquer operação em que se receba dinheiro, ou outra vantagem
+econômica, como condição para fornecer, liberar ou manter o acesso ao Software
+ou a uma Obra Derivada, ou em troca de licença, cópia ou sublicença deles.
+Isso inclui, sem limitação:
+  (a) vender, alugar ou sublicenciar mediante pagamento;
+  (b) cobrar assinatura, mensalidade, taxa ou licença pelo direito de usar;
+  (c) oferecer o Software, ou uma Obra Derivada, como produto de acesso pago a
+      vários clientes (SaaS), em que o que se vende é o acesso ao Software;
+  (d) incluir o Software em produto ou serviço que seja vendido.
+
+"Serviços Profissionais": trabalho prestado a um contratante em relação ao
+Software, como instalação, configuração, personalização, integração,
+treinamento, manutenção, suporte e operação ou hospedagem de uma instância
+destinada ao próprio contratante.
+
+
+2. PERMISSÕES
+
+É concedida a qualquer pessoa, gratuitamente, uma licença mundial, perpétua
+e não exclusiva para usar, copiar, estudar, modificar e distribuir o Software
+e as Obras Derivadas, para qualquer finalidade, inclusive na própria atividade
+empresarial ou comercial, desde que cumpridas as condições da seção 3.
+
+
+3. CONDIÇÕES
+
+(a) Proibição de Venda. É proibida a Venda do Software e de qualquer Obra
+    Derivada.
+
+(b) Distribuição gratuita e mesma licença. Toda cópia do Software ou Obra
+    Derivada que for distribuída deve ser distribuída gratuitamente, sob esta
+    mesma licença.
+
+(c) Atribuição. Toda cópia ou Obra Derivada distribuída deve manter o aviso de
+    copyright acima e o texto completo desta licença.
+
+
+4. SERVIÇOS PROFISSIONAIS
+
+A prestação de Serviços Profissionais por qualquer pessoa, remunerada ou não,
+é permitida e incentivada, e não constitui Venda, desde que:
+  (a) o Software continue disponível ao contratante, gratuitamente, com o
+      código-fonte e nos termos desta licença;
+  (b) o pagamento remunere o trabalho prestado e a infraestrutura utilizada, e
+      não seja condição para o contratante usar o Software. O contratante pode,
+      a qualquer momento, encerrar o serviço e continuar usando o Software;
+  (c) o prestador não se apresente como titular do Software nem cobre pelo
+      direito de usá-lo.
+
+
+5. ESCLARECIMENTOS
+
+Também não constitui Venda:
+  (a) usar o Software na própria atividade, ainda que comercial. Exemplo: uma
+      empresa usar o sistema para agendar os atendimentos de seus clientes e
+      cobrar por seus próprios serviços;
+  (b) pagar a provedores de infraestrutura necessária para executar o Software
+      (hospedagem, banco de dados, mensageria, domínio), desde que o Software
+      em si não seja cobrado de ninguém.
+
+
+6. TÉRMINO
+
+Quem descumprir a seção 3 perde automaticamente as permissões desta licença,
+sem prejuízo de outras medidas previstas em lei.
+
+
+7. TITULAR DOS DIREITOS
+
+Os termos desta licença se aplicam a quem recebe o Software por ela. O titular
+dos direitos autorais pode, a seu exclusivo critério, conceder licenças ou
+celebrar contratos com condições diferentes, inclusive onerosas, sem que isso
+altere esta licença para os demais.
+
+O titular não tem obrigação de prestar suporte, manutenção ou atualizações do
+Software, salvo se assumir essa obrigação em contrato escrito próprio. Serviços
+prestados por terceiros são de responsabilidade exclusiva deles, e o titular
+não responde por eles.
+
+
+8. AUSÊNCIA DE GARANTIA
+
+O SOFTWARE É FORNECIDO "NO ESTADO EM QUE SE ENCONTRA", SEM GARANTIA DE
+QUALQUER TIPO, EXPRESSA OU IMPLÍCITA, INCLUINDO, SEM LIMITAÇÃO, GARANTIAS DE
+COMERCIALIZAÇÃO, ADEQUAÇÃO A UMA FINALIDADE ESPECÍFICA E NÃO VIOLAÇÃO. NA
+MÁXIMA EXTENSÃO PERMITIDA PELA LEI APLICÁVEL, O TITULAR NÃO SERÁ RESPONSÁVEL
+POR QUAISQUER DANOS, PERDAS OU REIVINDICAÇÕES DECORRENTES DO SOFTWARE OU DO SEU
+USO.
+
+Contratos de Serviços Profissionais são independentes desta licença e não
+alteram a ausência de garantia do Software. A responsabilidade do prestador,
+quando existir, é a prevista no respectivo contrato.
+
+
+9. COMPONENTES E SERVIÇOS DE TERCEIROS E DADOS PESSOAIS
+
+O Software depende de bibliotecas e serviços de terceiros (por exemplo,
+Next.js, PostgreSQL, WhatsApp Cloud API da Meta, serviços de hospedagem e de
+banco de dados), regidos por seus próprios termos. Esta licença não se aplica
+a eles. Quem opera o Software é responsável por cumprir esses termos e pelo
+tratamento de dados pessoais conforme a legislação aplicável, incluindo a Lei
+Geral de Proteção de Dados (LGPD). Quem presta Serviços Profissionais com
+acesso a dados pessoais deve tratá-los conforme a LGPD e o contrato firmado
+com o contratante.
+
+
+10. LEI APLICÁVEL
+
+Esta licença é regida pelas leis da República Federativa do Brasil.

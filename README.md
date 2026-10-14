@@ -4,6 +4,8 @@ Sistema de agendamento de serviços integrado à WhatsApp Cloud API, com atendim
 
 O projeto foi desenvolvido como estudo prático de backend, banco de dados, integração com API externa, concorrência e construção de uma interface administrativa.
 
+> **Licença:** uso livre para qualquer pessoa, **venda proibida**. Veja o arquivo [LICENSE](LICENSE).
+
 ## Funcionalidades
 
 ### Atendimento pelo WhatsApp
@@ -12,8 +14,9 @@ O projeto foi desenvolvido como estudo prático de backend, banco de dados, inte
 - Menu conversacional com estado persistido no PostgreSQL.
 - Agendamento de serviços com escolha de horário.
 - Confirmação de agendamento por mensagem interativa.
-- Consulta e cancelamento de agendamentos.
-- Fluxo para falar com um atendente.
+- Consulta, cancelamento e remarcação de agendamentos pelo cliente, respeitando o prazo de 24 horas.
+- Fluxo para falar com um atendente, com o agendamento associado quando o pedido parte de uma tela de agendamento.
+- Mensagem inicial, confirmação e encerramento personalizáveis pela empresa.
 - Mensagens de texto, botões interativos e templates.
 - Proteção contra processamento duplicado de mensagens da Meta.
 - Retry automático para falhas temporárias da API do WhatsApp.
@@ -32,6 +35,8 @@ O painel protegido permite gerenciar:
 - Observações dos agendamentos.
 - Receita por período.
 - Configurações de antecedência mínima.
+- Dados da empresa e mensagens do WhatsApp.
+- Limpeza de agendamentos com mais de 30 dias.
 
 O sistema suporta múltiplos profissionais e permite definir quais serviços cada profissional atende.
 
@@ -43,9 +48,10 @@ O sistema suporta múltiplos profissionais e permite definir quais serviços cad
 - Prevenção de conflitos por sobreposição de horários.
 - Apenas agendamentos `agendado` e `confirmado` ocupam horários.
 - Agendamentos `completo`, `cancelado` e `nao_compareceu` liberam o horário.
-- Cancelamento pelo cliente com antecedência mínima de 24 horas.
+- Cancelamento e remarcação pelo cliente com antecedência mínima de 24 horas.
 - Reagendamento administrativo sem aplicar a antecedência mínima do cliente.
-- Conclusão automática de agendamentos depois do término do serviço.
+- Conclusão manual: concluir e marcar não comparecimento só ficam disponíveis depois do horário do atendimento, e um status pode ser corrigido pelo outro no histórico.
+- Serviços só podem ser excluídos se nunca foram agendados; caso contrário, são desativados.
 - Histórico das alterações de status e reagendamentos.
 
 ### Consistência e concorrência
@@ -151,6 +157,7 @@ O PostgreSQL armazena, entre outros dados:
 - histórico de agendamentos
 - conversas
 - atendimentos humanos
+- configurações da empresa
 - mensagens de atendimento
 - usuários administrativos
 - mensagens do WhatsApp já processadas
@@ -271,6 +278,8 @@ Para receber requisições externas durante testes de webhook, a porta `3000` pr
 | `npm run admin:criar -- <email> <senha> [telefone]`  | Cria um usuário administrativo                            |
 | `npm run admin:resetar-senha -- <email> <novaSenha>` | Redefine a senha de um usuário                            |
 | `npm run admin:listar`                               | Lista usuários administrativos                            |
+| `admin:excluir -- <email>`                           | Apaga um usuário                                          |
+| `admin:numero -- <email> [telefone]`                 | Edita ou adiciona um número de telefone ao usuário        |
 
 ## Testes
 
@@ -279,7 +288,10 @@ Os testes ficam em `tests/` e cobrem diferentes partes da aplicação, incluindo
 - Regras de agendamento.
 - Concorrência e conflitos de horário.
 - Snapshot de duração e preço.
-- Conclusão automática.
+- Conclusão manual e não comparecimento.
+- Configurações da empresa.
+- Exclusão de serviços.
+- Limpeza de agendamentos antigos.
 - CRUD de profissionais.
 - Autorização por profissional.
 - Sessões e autenticação.
@@ -289,7 +301,7 @@ Os testes ficam em `tests/` e cobrem diferentes partes da aplicação, incluindo
 - Retry da integração com a WhatsApp Cloud API.
 - Conversas concorrentes.
 
-A suíte atual conta com **57 testes automatizados**.
+A suíte atual conta com **71 testes automatizados**.
 
 Para executar apenas uma suíte:
 
@@ -312,18 +324,23 @@ npm run build
 
 O projeto está em desenvolvimento e foi construído como projeto pessoal de estudo.
 
-A implementação atual está validada com:
-
-```text
-57 testes passando
-TypeScript sem erros
-ESLint sem erros
-Prettier validado
-Build de produção concluído
-```
+A implementação atual está validada com testes automatizados, TypeScript, ESLint e Prettier.
 
 A integração real com a WhatsApp Cloud API depende da configuração das credenciais, webhook e recursos correspondentes na plataforma da Meta.
 
 ## Licença
 
-A definir.
+Este projeto usa a **Licença de Uso Livre Sem Venda**. O texto completo e válido está no arquivo [LICENSE](LICENSE). O resumo abaixo não o substitui.
+
+- Qualquer pessoa pode usar, copiar, estudar, modificar e distribuir o código, gratuitamente e para qualquer finalidade, inclusive na própria atividade empresarial. Exemplo: uma empresa usar o sistema para agendar os atendimentos dos seus clientes.
+- É **proibido vender** o software, suas cópias, versões modificadas ou o acesso a eles. Isso inclui licenças, assinaturas e a oferta do acesso ao software como produto pago.
+- **Prestar serviços** (instalação, configuração, personalização, treinamento, manutenção, suporte, operação e hospedagem para o próprio contratante) é **permitido e incentivado**, pago ou não, desde que o software continue disponível gratuitamente ao contratante e o pagamento não seja condição para usá-lo.
+- Versões modificadas só podem ser distribuídas gratuitamente, sob esta mesma licença e com o aviso de copyright.
+- Pagar a provedores de infraestrutura (hospedagem, banco de dados, mensageria, domínio) para executar o software não é venda.
+- O software é fornecido sem garantia.
+
+Esta licença **não é open source** segundo a definição da OSI, porque proíbe a venda. O código está aberto para uso e estudo, mas a licença é personalizada, e o GitHub a exibirá como licença não reconhecida.
+
+O sistema depende de serviços de terceiros, como a WhatsApp Cloud API da Meta, hospedagem e banco de dados, cada um com termos próprios. Quem opera o sistema é responsável por cumpri-los e pelo tratamento de dados pessoais conforme a LGPD.
+
+Este projeto não aceita contribuições externas.
