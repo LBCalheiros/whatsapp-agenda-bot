@@ -1,6 +1,7 @@
 import { AppError } from '@/infra/errors';
 import { logger } from '@/infra/logger';
 import { obterSessaoAtual } from '@/infra/autenticacaoMiddleware';
+import { ocultarPrecoParaNaoGerente, ocultarPrecosParaNaoGerente } from '@/infra/visibilidade';
 import { validar } from '@/infra/validacao';
 import { criarDataBRT } from '@/infra/data';
 import { criarAgendamento, listarAgendamentos } from '@/models/agendamento';
@@ -77,7 +78,7 @@ export async function GET(request: Request) {
       historico: dados.historico,
     });
 
-    return Response.json(agendamentos);
+    return Response.json(ocultarPrecosParaNaoGerente(agendamentos, sessao.role === 'gerente'));
   } catch (error) {
     if (error instanceof AppError) {
       return Response.json({ error: error.message }, { status: error.statusCode });
@@ -104,7 +105,9 @@ export async function POST(request: Request) {
       dataHora: dados.dataHora,
     });
 
-    return Response.json(agendamento, { status: 201 });
+    return Response.json(ocultarPrecoParaNaoGerente(agendamento, sessao.role === 'gerente'), {
+      status: 201,
+    });
   } catch (error) {
     if (error instanceof AppError) {
       return Response.json({ error: error.message }, { status: error.statusCode });

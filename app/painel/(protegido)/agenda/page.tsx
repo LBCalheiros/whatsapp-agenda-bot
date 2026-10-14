@@ -290,7 +290,7 @@ function SecaoReceita() {
 export default function AgendaPage() {
   const searchParams = useSearchParams();
 
-  const [aba, setAba] = useState<Aba>('proximos');
+  const [abaEscolhida, setAba] = useState<Aba>('proximos');
   const [periodo, setPeriodo] = useState<Periodo>('todos');
   const [filtroServicoId, setFiltroServicoId] = useState('');
   const [filtroCliente, setFiltroCliente] = useState(searchParams.get('cliente') ?? '');
@@ -313,6 +313,12 @@ export default function AgendaPage() {
 
   const euEstado = useApiPolling<EuMesmo>('/api/auth/me', 60000);
   const souGerente = euEstado.status === 'sucesso' && euEstado.dados.role === 'gerente';
+
+  // se o papel deixar de ser gerente com a aba de receita aberta, cai em Próximos
+  const aba: Aba =
+    abaEscolhida === 'receita' && euEstado.status === 'sucesso' && !souGerente
+      ? 'proximos'
+      : abaEscolhida;
 
   const servicosEstado = useApiPolling<Servico[]>('/api/servicos', 60000);
   const servicos = servicosEstado.status === 'sucesso' ? servicosEstado.dados : [];
@@ -624,18 +630,6 @@ export default function AgendaPage() {
           </div>
         )}
 
-        {aba === 'historico' && souGerente && (
-          <div className="flex flex-col gap-1">
-            <Button variante="secundario" onClick={limparAntigos} disabled={limpando}>
-              Limpar agendamentos antigos
-            </Button>
-            {resultadoLimpeza && (
-              <p className="text-xs text-gray-500 dark:text-gray-400">{resultadoLimpeza}</p>
-            )}
-            {erroLimpeza && <ErrorState mensagem={erroLimpeza} />}
-          </div>
-        )}
-
         {aba !== 'receita' && listaEstado.status === 'carregando' && (
           <LoadingState texto="Carregando..." />
         )}
@@ -650,6 +644,19 @@ export default function AgendaPage() {
                 Nenhum agendamento encontrado.
               </p>
             )}
+
+            {aba === 'historico' && souGerente && (
+              <div className="flex flex-col gap-1">
+                <Button variante="secundario" onClick={limparAntigos} disabled={limpando}>
+                  Limpar agendamentos antigos
+                </Button>
+                {resultadoLimpeza && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{resultadoLimpeza}</p>
+                )}
+                {erroLimpeza && <ErrorState mensagem={erroLimpeza} />}
+              </div>
+            )}
+
             {lista.map((agendamento) => (
               <li key={agendamento.id}>
                 <button

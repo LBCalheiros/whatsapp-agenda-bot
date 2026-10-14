@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { AppError } from '@/infra/errors';
 import { logger } from '@/infra/logger';
 import { obterSessaoAtual } from '@/infra/autenticacaoMiddleware';
+import { ocultarPrecoParaNaoGerente } from '@/infra/visibilidade';
 import { validar } from '@/infra/validacao';
 import { alterarServicoDoAgendamento } from '@/models/agendamento';
 
@@ -21,7 +22,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const { servicoId } = validar(schemaAlterarServico, body);
 
     const agendamento = await alterarServicoDoAgendamento(Number(id), servicoId);
-    return Response.json(agendamento);
+    return Response.json(ocultarPrecoParaNaoGerente(agendamento, sessao.role === 'gerente'));
   } catch (error) {
     if (error instanceof AppError) {
       return Response.json({ error: error.message }, { status: error.statusCode });

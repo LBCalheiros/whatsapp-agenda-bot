@@ -1,6 +1,7 @@
 import { AppError } from '@/infra/errors';
 import { logger } from '@/infra/logger';
 import { obterSessaoAtual } from '@/infra/autenticacaoMiddleware';
+import { ocultarPrecoParaNaoGerente } from '@/infra/visibilidade';
 import { validar } from '@/infra/validacao';
 import { atualizarObservacoes } from '@/models/agendamento';
 import { z } from 'zod';
@@ -20,7 +21,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const body = await request.json();
     const dados = validar(schemaObservacoes, body);
     const agendamento = await atualizarObservacoes(Number(id), dados.observacoes);
-    return Response.json(agendamento);
+    return Response.json(ocultarPrecoParaNaoGerente(agendamento, sessao.role === 'gerente'));
   } catch (error) {
     if (error instanceof AppError) {
       return Response.json({ error: error.message }, { status: error.statusCode });
