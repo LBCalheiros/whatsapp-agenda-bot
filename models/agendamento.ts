@@ -3,7 +3,12 @@ import { AppError } from '@/infra/errors';
 import { fimDoDiaBRT, inicioDoDiaBRT } from '@/infra/data';
 import { buscarServicoPorId } from '@/models/servico';
 import { obterProfissionalDisponivel, validarHorarioDisponivel } from '@/models/disponibilidade';
-import { buscarAntecedenciaMinima, profissionalAtendeServico } from '@/models/profissional';
+import {
+  buscarAntecedenciaMinima,
+  buscarProfissionalPorId,
+  profissionalAtendeServico,
+} from '@/models/profissional';
+import { buscarOuCriarClienteManual } from '@/models/cliente';
 import { comLockDeProfissional } from '@/infra/lockProfissional';
 import { comLockDeAgendamento } from '@/infra/lockAgendamento';
 
@@ -90,6 +95,79 @@ export async function criarAgendamento(input: {
     } catch (error) {
       if (ehViolacaoDeUnicidade(error)) {
         throw new AppError('Esse horário acabou de ser ocupado, escolha outro');
+      }
+
+      throw error;
+    }
+  });
+}
+
+// Agendamento criado à mão por gerente ou funcionário, para um cliente identificado só pelo
+// telefone (mesmo formato do que o bot grava). Como no reagendamento pelo painel, o
+// funcionário decide: expediente, bloqueios e antecedência mínima não são conferidos. O que
+// continua valendo é não sobrepor outro agendamento ativo do mesmo profissional.
+export async function criarAgendamentoManual(input: {
+  telefone: string;
+  nomeCliente?: string | null;
+  profissionalId: number;
+  servicoId: number;
+  dataHora: Date;
+  observacoes?: string | null;
+}) {
+  const { telefone, nomeCliente, profissionalId, servicoId, dataHora } = input;
+  const observacoes = input.observacoes?.trim() || null;
+
+  if (Number.isNaN(dataHora.getTime())) {
+    throw new AppError('Data e hora inválidas');
+  }
+
+  if (dataHora.getTime() <= Date.now()) {
+    throw new AppError('O horário do agendamento precisa estar no futuro');
+  }
+
+  const servico = await buscarServicoPorId(servicoId);
+
+  if (!servico.ativo) {
+    throw new AppError('Esse serviço está desativado');
+  }
+
+  const profissional = await buscarProfissionalPorId(profissionalId);
+
+  if (!profissional.ativo) {
+    throw new AppError('Esse profissional está desativado');
+  }
+
+  if (!(await profissionalAtendeServico(profissionalId, servicoId))) {
+    throw new AppError('Esse profissional não atende esse serviço');
+  }
+
+  return comLockDeProfissional(profissionalId, async () => {
+    await validarConflitoDeHorario(profissionalId, 0, dataHora, servico.duracao_minutos);
+
+    // só aqui, com tudo validado, para não deixar cliente órfão por causa de erro de regra
+    const cliente = await buscarOuCriarClienteManual(telefone, nomeCliente);
+
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO agendamentos
+         (cliente_id, profissional_id, servico_id, data_hora, duracao_minutos, preco, observacoes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING *`,
+        [
+          cliente.id,
+          profissionalId,
+          servicoId,
+          dataHora,
+          servico.duracao_minutos,
+          servico.preco,
+          observacoes,
+        ],
+      );
+
+      return rows[0] as Agendamento;
+    } catch (error) {
+      if (ehViolacaoDeUnicidade(error)) {
+        throw new AppError('Já existe um agendamento nesse exato horário para esse profissional');
       }
 
       throw error;

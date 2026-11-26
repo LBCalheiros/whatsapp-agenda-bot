@@ -5,6 +5,7 @@ import { validar } from '@/infra/validacao';
 import {
   criarProfissional,
   listarProfissionaisAtivos,
+  listarProfissionaisAtivosComServicos,
   listarTodosProfissionais,
 } from '@/models/profissional';
 import { z } from 'zod';
@@ -25,9 +26,13 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const incluirInativos = searchParams.get('incluirInativos') === 'true';
 
+    const comServicos = searchParams.get('comServicos') === 'true';
+
     const profissionais = incluirInativos
       ? await listarTodosProfissionais()
-      : await listarProfissionaisAtivos();
+      : comServicos
+        ? await listarProfissionaisAtivosComServicos()
+        : await listarProfissionaisAtivos();
     return Response.json(profissionais);
   } catch (error) {
     logger.error({ error }, 'Erro inesperado');

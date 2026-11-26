@@ -19,6 +19,19 @@ export async function listarProfissionaisAtivos() {
   return rows as Profissional[];
 }
 
+// Para telas que precisam saber quem atende cada serviço (ex.: agendamento manual).
+export async function listarProfissionaisAtivosComServicos() {
+  const { rows } = await pool.query(
+    `SELECT p.id, p.nome, p.telefone_contato, p.ativo, p.antecedencia_minima_horas,
+            ARRAY(
+              SELECT ps.servico_id FROM profissional_servicos ps
+              WHERE ps.profissional_id = p.id ORDER BY ps.servico_id
+            ) AS "servicoIds"
+     FROM profissionais p WHERE p.ativo = true ORDER BY p.nome`,
+  );
+  return rows as (Profissional & { servicoIds: number[] })[];
+}
+
 // Usada pela tela de gestão — mostra inativos também, pra dar pra reativar.
 export async function listarTodosProfissionais() {
   const { rows } = await pool.query(

@@ -262,24 +262,25 @@ Para receber requisições externas durante testes de webhook, a porta `3000` pr
 
 ## Comandos
 
-| Comando                                              | Descrição                                                 |
-| ---------------------------------------------------- | --------------------------------------------------------- |
-| `npm run dev`                                        | Inicia o PostgreSQL e a aplicação em modo desenvolvimento |
-| `npm run services:up`                                | Sobe os serviços locais                                   |
-| `npm run services:down`                              | Para e remove os serviços locais                          |
-| `npm run migration:up`                               | Executa migrations pendentes                              |
-| `npm run migration:create -- <nome>`                 | Cria uma nova migration                                   |
-| `npm test`                                           | Executa toda a suíte de testes                            |
-| `npm run lint:check`                                 | Executa ESLint e verifica formatação                      |
-| `npm run lint:fix`                                   | Corrige lint e formatação                                 |
-| `npx tsc --noEmit`                                   | Verifica os tipos TypeScript                              |
-| `npm run build`                                      | Gera o build de produção                                  |
-| `npm run postgres`                                   | Abre o `psql` no PostgreSQL local                         |
-| `npm run admin:criar -- <email> <senha> [telefone]`  | Cria um usuário administrativo                            |
-| `npm run admin:resetar-senha -- <email> <novaSenha>` | Redefine a senha de um usuário                            |
-| `npm run admin:listar`                               | Lista usuários administrativos                            |
-| `admin:excluir -- <email>`                           | Apaga um usuário                                          |
-| `admin:numero -- <email> [telefone]`                 | Edita ou adiciona um número de telefone ao usuário        |
+| Comando                                              | Descrição                                                                       |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `npm run dev`                                        | Sobe o PostgreSQL, espera ficar pronto, roda as migrations e inicia a aplicação |
+| `npm run services:up`                                | Sobe os serviços locais                                                         |
+| `npm run services:down`                              | Para e remove os serviços locais                                                |
+| `npm run wait-for-postgres`                          | Espera o PostgreSQL aceitar conexões                                            |
+| `npm run migration:up`                               | Executa migrations pendentes                                                    |
+| `npm run migration:create -- <nome>`                 | Cria uma nova migration                                                         |
+| `npm test`                                           | Sobe o banco, roda as migrations e executa a suíte junto com `next dev`         |
+| `npm run lint:check`                                 | Executa ESLint e verifica formatação                                            |
+| `npm run lint:fix`                                   | Corrige lint e formatação                                                       |
+| `npx tsc --noEmit`                                   | Verifica os tipos TypeScript                                                    |
+| `npm run build`                                      | Gera o build de produção                                                        |
+| `npm run postgres`                                   | Abre o `psql` no PostgreSQL local                                               |
+| `npm run admin:criar -- <email> <senha> [telefone]`  | Cria um usuário administrativo                                                  |
+| `npm run admin:resetar-senha -- <email> <novaSenha>` | Redefine a senha de um usuário                                                  |
+| `npm run admin:listar`                               | Lista usuários administrativos                                                  |
+| `admin:excluir -- <email>`                           | Apaga um usuário                                                                |
+| `admin:numero -- <email> [telefone]`                 | Edita ou adiciona um número de telefone ao usuário                              |
 
 ## Testes
 
@@ -301,12 +302,14 @@ Os testes ficam em `tests/` e cobrem diferentes partes da aplicação, incluindo
 - Retry da integração com a WhatsApp Cloud API.
 - Conversas concorrentes.
 
-A suíte atual conta com **71 testes automatizados**.
+A suíte atual conta com **93 testes automatizados**.
 
-Para executar apenas uma suíte:
+`npm test` inicia o `next dev` ao lado do Jest e encerra os dois quando o Jest termina, então não funciona com `npm run dev` já aberto (as duas instâncias disputam a mesma pasta `.next`). Os argumentos de `npm test -- ...` vão para o `concurrently`, não para o Jest.
+
+Para executar apenas uma suíte (banco já no ar, sem subir o Next):
 
 ```bash
-npm test -- --runInBand tests/agendamento.test.ts
+npx jest --runInBand tests/agendamento.test.ts
 ```
 
 ## Validação do projeto

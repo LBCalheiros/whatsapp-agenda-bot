@@ -9,6 +9,7 @@ import { Card } from '@/components/ui/Card';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { formatarDataYYYYMMDD } from '@/infra/data';
+import { AgendamentoCriado, FormNovoAgendamento } from './FormNovoAgendamento';
 
 type StatusAgendamento = 'agendado' | 'confirmado' | 'cancelado' | 'completo' | 'nao_compareceu';
 
@@ -299,6 +300,7 @@ export default function AgendaPage() {
   >('');
 
   const [selecionadoId, setSelecionadoId] = useState<number | null>(null);
+  const [criando, setCriando] = useState(false);
   const [editandoNome, setEditandoNome] = useState(false);
   const [nomeRascunho, setNomeRascunho] = useState('');
   const [salvandoNome, setSalvandoNome] = useState(false);
@@ -365,13 +367,36 @@ export default function AgendaPage() {
 
   function trocarAba(novaAba: Aba) {
     setAba(novaAba);
+    setCriando(false);
     setFiltroStatusHistorico('');
     setSelecionadoId(null);
     setEditandoNome(false);
     setErroAcao(null);
   }
 
+  function iniciarCriacao() {
+    setAba('proximos');
+    setSelecionadoId(null);
+    setEditandoNome(false);
+    setErroAcao(null);
+    setCriando(true);
+  }
+
+  function aoCriarAgendamento(criado: AgendamentoCriado) {
+    // limpa os filtros para o agendamento novo não ficar escondido da lista
+    setPeriodo('todos');
+    setFiltroServicoId('');
+    setFiltroCliente('');
+    setCriando(false);
+    setSelecionadoId(criado.id);
+    setObservacoesRascunho(criado.observacoes ?? '');
+    setNovaDataHora(paraInputDatetimeLocal(criado.data_hora));
+    setErroAcao(null);
+    forcarAtualizacao();
+  }
+
   function selecionar(agendamento: Agendamento) {
+    setCriando(false);
     setSelecionadoId(agendamento.id);
     setEditandoNome(false);
     setObservacoesRascunho(agendamento.observacoes ?? '');
@@ -543,7 +568,12 @@ export default function AgendaPage() {
   return (
     <div className="flex flex-col gap-6 md:h-[calc(100vh-3rem)] md:flex-row">
       <div className="w-full shrink-0 overflow-y-auto md:w-80">
-        <h1 className="mb-4 text-2xl font-semibold text-gray-900 dark:text-gray-100">Agenda</h1>
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">Agenda</h1>
+          <Button onClick={iniciarCriacao} disabled={criando}>
+            Novo agendamento
+          </Button>
+        </div>
 
         <div className="mb-4 flex gap-1 rounded-md bg-gray-100 p-1 dark:bg-gray-800">
           <button
@@ -684,7 +714,15 @@ export default function AgendaPage() {
       <div className="flex-1">
         {aba === 'receita' && <SecaoReceita />}
 
-        {aba !== 'receita' && !selecionado && (
+        {criando && (
+          <FormNovoAgendamento
+            servicos={servicos}
+            onCriado={aoCriarAgendamento}
+            onCancelar={() => setCriando(false)}
+          />
+        )}
+
+        {!criando && aba !== 'receita' && !selecionado && (
           <Card className="flex md:h-full items-center justify-center">
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Selecione um agendamento à esquerda.
@@ -692,7 +730,7 @@ export default function AgendaPage() {
           </Card>
         )}
 
-        {aba !== 'receita' && selecionado && (
+        {!criando && aba !== 'receita' && selecionado && (
           <Card className="flex md:h-full flex-col gap-4 overflow-y-auto">
             <div className="border-b border-gray-200 pb-3 dark:border-gray-700">
               {editandoNome ? (
